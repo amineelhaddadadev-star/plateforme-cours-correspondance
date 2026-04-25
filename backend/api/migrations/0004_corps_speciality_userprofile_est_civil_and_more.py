@@ -5,54 +5,6 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
-def seed_reference_tables(apps, schema_editor):
-    Corps = apps.get_model("api", "Corps")
-    Rank = apps.get_model("api", "Rank")
-    Speciality = apps.get_model("api", "Speciality")
-    UserProfile = apps.get_model("api", "UserProfile")
-
-    corp_defaults = [
-        ("ARMEE_TERRE", "Armee de Terre"),
-        ("ARMEE_AIR", "Armee de l'Air"),
-        ("MARINE", "Marine"),
-        ("GENDARMERIE", "Gendarmerie"),
-    ]
-    created_corps = {}
-    for code, label in corp_defaults:
-        corps, _ = Corps.objects.get_or_create(code=code, defaults={"label": label})
-        created_corps[code] = corps
-
-    for code, label, corps_code in [
-        ("CPL", "Caporal", "ARMEE_TERRE"),
-        ("SGT", "Sergent", "ARMEE_TERRE"),
-        ("LT", "Lieutenant", "ARMEE_AIR"),
-        ("CNE", "Capitaine", "ARMEE_AIR"),
-        ("ENS", "Enseigne", "MARINE"),
-        ("LV", "Lieutenant de vaisseau", "MARINE"),
-    ]:
-        Rank.objects.get_or_create(code=code, defaults={"label": label, "corps": created_corps[corps_code]})
-
-    for code, label in [
-        ("INF", "Infanterie"),
-        ("LOG", "Logistique"),
-        ("COM", "Communication"),
-        ("SYS", "Systemes d'information"),
-        ("GEN", "General"),
-    ]:
-        Speciality.objects.get_or_create(code=code, defaults={"label": label})
-
-    fallback_corps = created_corps["ARMEE_TERRE"]
-    fallback_rank = Rank.objects.filter(corps=fallback_corps).order_by("label").first()
-    fallback_speciality = Speciality.objects.filter(code="GEN").first()
-    if fallback_rank and fallback_speciality:
-        UserProfile.objects.filter(role="Instructeur", matricule="").update(est_civil=True)
-        UserProfile.objects.exclude(role="Instructeur", est_civil=True).filter(corps__isnull=True).update(corps=fallback_corps)
-        UserProfile.objects.exclude(role="Instructeur", est_civil=True).filter(rank__isnull=True).update(rank=fallback_rank)
-        UserProfile.objects.exclude(role="Instructeur", est_civil=True).filter(speciality__isnull=True).update(
-            speciality=fallback_speciality
-        )
-
-
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -109,5 +61,4 @@ class Migration(migrations.Migration):
             model_name='rank',
             constraint=models.UniqueConstraint(fields=('corps', 'label'), name='uq_rank_corps_label'),
         ),
-        migrations.RunPython(seed_reference_tables, migrations.RunPython.noop),
     ]

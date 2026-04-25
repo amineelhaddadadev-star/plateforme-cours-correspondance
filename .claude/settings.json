@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(python manage.py shell -c \":*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -l \"Corps\\\\|Rank\\\\|Speciality\" /c/Users/NB/Desktop/pfs/backend/api/migrations/*.py)",
+      "Bash(npm list:*)",
+      "Bash(python backend/manage.py makemigrations api --name userprofile_fichier_renseignement)",
+      "Bash(python backend/manage.py migrate)"
     ]
   }
 }

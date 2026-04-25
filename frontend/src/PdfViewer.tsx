@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { renderAsync } from "docx-preview";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -24,7 +25,12 @@ function PdfPage({ page, scale }: { page: PDFPageProxy; scale: number }) {
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d")!;
     if (renderTaskRef.current) renderTaskRef.current.cancel();
-    renderTaskRef.current = page.render({ canvasContext: ctx, viewport, canvas });
+    const task = page.render({ canvasContext: ctx, viewport, canvas });
+    renderTaskRef.current = task;
+    task.promise.catch((err: unknown) => {
+      if (err instanceof Error && err.name === "RenderingCancelledException") return;
+      console.error(err);
+    });
     return () => { renderTaskRef.current?.cancel(); };
   }, [page, scale]);
 
@@ -50,7 +56,7 @@ export function usePdfPages(base64: string) {
     (async () => {
       try {
         const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-        const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+        const doc = await pdfjsLib.getDocument({ data: bytes, verbosity: 0 }).promise;
         if (cancelled) return;
         setPdf(doc);
         for (let i = 1; i <= doc.numPages; i++) {
@@ -117,6 +123,82 @@ export function InlinePdfViewer({ base64, name }: InlinePdfViewerProps) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ── DOCX Viewer ─────────────────────────────────────────────────────────────
+
+interface DocxViewerProps {
+  base64: string;
+  name: string;
+  onClose: () => void;
+  onDownload: () => void;
+}
+
+function useDocxRender(base64: string, containerRef: React.RefObject<HTMLDivElement | null>) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    (async () => {
+      try {
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        if (cancelled || !containerRef.current) return;
+        containerRef.current.innerHTML = "";
+        await renderAsync(blob, containerRef.current, undefined, {
+          className: "docx-render",
+          inWrapper: true,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          ignoreFonts: false,
+          breakPages: true,
+          useBase64URL: true,
+          renderChanges: false,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          renderEndnotes: true,
+        });
+        if (!cancelled) setLoading(false);
+      } catch {
+        if (!cancelled) { setLoading(false); setError("Impossible de charger le document."); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [base64, containerRef]);
+
+  return { loading, error };
+}
+
+export function InlineDocxViewer({ base64, name }: { base64: string; name: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { loading, error } = useDocxRender(base64, containerRef);
+
+  return (
+    <div className="flex flex-col rounded-xl border border-app-muted bg-white overflow-hidden shadow-sm">
+      <div className="flex h-11 items-center gap-3 border-b border-app-muted/60 px-4">
+        <span className="flex-1 truncate text-sm font-semibold text-app-dark" title={name}>
+          📄 {name}
+        </span>
+      </div>
+      <div className="overflow-y-auto bg-app-soft/50 p-4" style={{ maxHeight: "70vh" }}>
+        {loading && !error && (
+          <div className="flex flex-col items-center gap-2 py-10">
+            <p className="text-xs text-app-dark/50">Chargement du document…</p>
+          </div>
+        )}
+        {error && (
+          <div className="py-8 text-center">
+            <p className="text-sm text-red-500">⚠ {error}</p>
+          </div>
+        )}
+        <div ref={containerRef} />
       </div>
     </div>
   );

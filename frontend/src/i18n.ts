@@ -1,14 +1,12 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
-const savedLanguage = localStorage.getItem("app_language") ?? "fr";
-
 void i18n.use(initReactI18next).init({
   resources: {
     fr: {
       translation: {
         nav: {
-          brand: "Platform Correspondence",
+          brand: "Plateforme de cours par correspondance",
           home: "Accueil",
           dashboard: "Tableau de bord",
           login: "Connexion",
@@ -17,7 +15,7 @@ void i18n.use(initReactI18next).init({
           logout: "Deconnexion",
         },
         titles: {
-          appName: "Platform Correspondence",
+          appName: "Plateforme de cours par correspondance",
           home: "Accueil",
           login: "Connexion",
           signup: "Inscription",
@@ -26,7 +24,6 @@ void i18n.use(initReactI18next).init({
           adminWorkspace: "Espace Administration",
           instructorDashboard: "Tableau Instructeur",
           traineeDashboard: "Tableau Stagiaire",
-          supervisorDashboard: "Tableau Superviseur",
           coordinatorDashboard: "Tableau Coordonnateur",
           adminOverview: "Vue generale",
           adminUsers: "Utilisateurs",
@@ -50,10 +47,6 @@ void i18n.use(initReactI18next).init({
             title: "Espace Administration",
             summary: "Pilotez la plateforme, les utilisateurs et les operations globales.",
           },
-          Superviseur: {
-            title: "Espace Superviseur",
-            summary: "Supervisez les resultats des classes et la qualite de la formation.",
-          },
           Coordinateur: {
             title: "Espace Coordonnateur",
             summary: "Coordonnez la planification et le suivi transverse des activites.",
@@ -71,7 +64,7 @@ void i18n.use(initReactI18next).init({
           badge: "Plateforme de formation entreprise",
           title: "Un espace moderne pour les personnes, les programmes et la progression.",
           subtitle:
-            "Collaboration unifiee entre Instructeurs, Stagiaires, Admins, Superviseurs et Coordinateurs.",
+            "Collaboration unifiee entre Instructeurs, Stagiaires, Admins et Coordinateurs.",
           ctaLogin: "Acceder a la plateforme",
           ctaSignup: "Creer un compte",
           highlightsTitle: "Points forts de la plateforme",
@@ -106,10 +99,6 @@ void i18n.use(initReactI18next).init({
         settings: {
           title: "Parametres",
           subtitle: "Personnalisez les preferences de votre espace.",
-          languageTitle: "Langue de l'interface",
-          languageHint: "Le francais est la langue par defaut.",
-          french: "Francais",
-          english: "Anglais",
           accountTitle: "Session",
           accountConnected: "Connecte en tant que",
           accountDisconnected: "Aucune session active.",
@@ -132,145 +121,12 @@ void i18n.use(initReactI18next).init({
           Instructeur: "Instructeur",
           Stagiaire: "Stagiaire",
           Admin: "Admin",
-          Superviseur: "Superviseur",
-          Coordinateur: "Coordinateur",
-        },
-      },
-    },
-    en: {
-      translation: {
-        nav: {
-          brand: "Platform Correspondence",
-          home: "Home",
-          dashboard: "Dashboard",
-          login: "Login",
-          signup: "Signup",
-          settings: "Settings",
-          logout: "Logout",
-        },
-        titles: {
-          appName: "Platform Correspondence",
-          home: "Home",
-          login: "Login",
-          signup: "Signup",
-          settings: "Settings",
-          dashboard: "Dashboard",
-          adminWorkspace: "Administration Workspace",
-          instructorDashboard: "Instructor Dashboard",
-          traineeDashboard: "Trainee Dashboard",
-          supervisorDashboard: "Supervisor Dashboard",
-          coordinatorDashboard: "Coordinator Dashboard",
-          adminOverview: "Overview",
-          adminUsers: "Users",
-          adminUserDetails: "User Details",
-          adminAccounts: "Accounts",
-          adminSubjects: "Subjects",
-          adminSubjectsControls: "Subjects - Controls",
-          adminSubjectsCourses: "Subjects - Courses",
-          adminClasses: "Classes",
-        },
-        workspace: {
-          Instructeur: {
-            title: "Instructor Workspace",
-            summary: "Track sessions, assign evaluations, and review trainee progression.",
-          },
-          Stagiaire: {
-            title: "Trainee Workspace",
-            summary: "Follow your assigned program, milestones, and upcoming evaluations.",
-          },
-          Admin: {
-            title: "Administration Workspace",
-            summary: "Manage platform settings, users, and global compliance activity.",
-          },
-          Superviseur: {
-            title: "Supervisor Workspace",
-            summary: "Monitor team outcomes and ensure delivery quality across cohorts.",
-          },
-          Coordinateur: {
-            title: "Coordinator Workspace",
-            summary: "Coordinate operations, scheduling, and communication across stakeholders.",
-          },
-        },
-        admin: {
-          panelTitle: "Admin Panel",
-          navOverview: "Overview",
-          navUsers: "Users",
-          navAccounts: "Accounts",
-          navSubjects: "Subjects",
-          navClasses: "Classes",
-        },
-        home: {
-          badge: "Enterprise Training Platform",
-          title: "A modern workspace for people, programs, and progression.",
-          subtitle:
-            "Unified collaboration between Instructeurs, Stagiaires, Admins, Superviseurs, and Coordinateurs.",
-          ctaLogin: "Access Platform",
-          ctaSignup: "Create Account",
-          highlightsTitle: "Platform Highlights",
-          highlight1: "Role-specific dashboard with contextual actions.",
-          highlight2: "Secure authentication with JWT lifecycle management.",
-          highlight3: "Fast delivery stack with Django REST and React + Vite.",
-        },
-        login: {
-          title: "Login",
-          subtitle: "Sign in to access your workspace.",
-          submit: "Sign in",
-          loading: "Signing in...",
-        },
-        signup: {
-          title: "Signup",
-          subtitle: "Create an account and choose your profile.",
-          profile: "Profile",
-          submit: "Create account",
-          loading: "Creating account...",
-        },
-        dashboard: {
-          badge: "Dashboard",
-          profileContext: "Profile Context",
-          user: "User",
-          email: "Email",
-          role: "Role",
-          matricule: "Matricule",
-          noEmail: "Not provided",
-          noMatricule: "None (civil instructor)",
-          generatedAction: "Action generated from your current role.",
-        },
-        settings: {
-          title: "Settings",
-          subtitle: "Customize your workspace preferences.",
-          languageTitle: "Interface language",
-          languageHint: "French is the default language.",
-          french: "French",
-          english: "English",
-          accountTitle: "Session",
-          accountConnected: "Signed in as",
-          accountDisconnected: "No active session.",
-        },
-        labels: {
-          username: "Username",
-          password: "Password",
-          email: "Email",
-          matriculeRequired: "Matricule (required for military profiles)",
-          matriculeOptional: "Matricule (optional for civil instructor)",
-        },
-        errors: {
-          invalidCredentials: "Invalid credentials.",
-          sessionExpired: "Session expired. Please login again.",
-          profileLoadFailed: "Could not load profile.",
-          signupFailed: "Signup failed. Username may already exist.",
-          matriculeRequired: "Matricule is required for military profiles.",
-        },
-        roles: {
-          Instructeur: "Instructeur",
-          Stagiaire: "Stagiaire",
-          Admin: "Admin",
-          Superviseur: "Superviseur",
           Coordinateur: "Coordinateur",
         },
       },
     },
   },
-  lng: savedLanguage,
+  lng: "fr",
   fallbackLng: "fr",
   interpolation: {
     escapeValue: false,

@@ -30,6 +30,7 @@ from .models import (
     CoursFichier,
     Evaluation,
     EventAudit,
+    FichierRenseignementTemplate,
     Inscription,
     Matiere,
     Module,
@@ -103,7 +104,7 @@ def log_event(
  
 
 def ensure_reference_manager(profile):
-    if profile.role not in {UserProfile.ROLE_ADMIN, UserProfile.ROLE_SUPERVISEUR}:
+    if profile.role != UserProfile.ROLE_ADMIN:
         return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
     return None
 
@@ -522,88 +523,6 @@ class StageaireDashboardView(APIView):
         )
 
 
-class SuperviseurDashboardView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_SUPERVISEUR:
-            return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
-
-        today = timezone.now().date()
-        classes_data = []
-        for classe in Classe.objects.select_related("brigade").all()[:100]:
-            stagiaires_ids = list(
-                StagiaireClasse.objects.filter(classe=classe)
-                .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=today))
-                .values_list("stagiaire_id", flat=True)
-            )
-            controles_qs = Controle.objects.filter(cours__inscriptions__stagiaire_id__in=stagiaires_ids).distinct()
-            notes_qs = Evaluation.objects.filter(
-                soumission__stagiaire_id__in=stagiaires_ids,
-                est_publiee=True,
-            )
-            avg_note = notes_qs.aggregate(avg=models.Avg("note"))["avg"]
-
-            classes_data.append(
-                {
-                    "classe_code": classe.code_classe,
-                    "brigade_code": classe.brigade.code_brigade,
-                    "stagiaires_count": len(stagiaires_ids),
-                    "controles_count": controles_qs.count(),
-                    "notes_published_count": notes_qs.count(),
-                    "note_moyenne": round(float(avg_note), 2) if avg_note is not None else None,
-                }
-            )
-
-        stagiaires_total = (
-            StagiaireClasse.objects.filter(Q(date_fin__isnull=True) | Q(date_fin__gte=today))
-            .values("stagiaire_id")
-            .distinct()
-            .count()
-        )
-
-        activities = []
-        for c in Controle.objects.exclude(statut=Controle.STATUT_BROUILLON).order_by("-date_publication")[:5]:
-            activities.append({
-                "type": "controle",
-                "label": c.nom,
-                "status": c.statut,
-                "date": c.date_publication.isoformat() if c.date_publication else None,
-            })
-        for e in (
-            Evaluation.objects.filter(est_publiee=True)
-            .select_related("soumission__controle")
-            .order_by("-date_publication")[:5]
-        ):
-            activities.append({
-                "type": "evaluation",
-                "label": f"Note publiée : {e.soumission.controle.nom}",
-                "status": "PUBLIE",
-                "date": e.date_publication.isoformat() if e.date_publication else None,
-            })
-        activities.sort(key=lambda x: x["date"] or "", reverse=True)
-        activities = activities[:8]
-
-        return Response(
-            {
-                "role": profile.role,
-                "monitoring": {
-                    "classes_count": Classe.objects.count(),
-                    "brigades_count": Brigade.objects.count(),
-                    "controles_count": Controle.objects.count(),
-                    "published_notes_count": Evaluation.objects.filter(est_publiee=True).count(),
-                    "stagiaires_count": stagiaires_total,
-                },
-                "classes": classes_data,
-                "recent_activities": activities,
-                "notifications": {
-                    "unread_count": Notification.objects.filter(destinataire=request.user, est_lue=False).count(),
-                },
-            }
-        )
-
-
 class CoordinateurDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -863,6 +782,148 @@ class AdminClassementView(APIView):
                 "leaderboard": leaderboard,
             })
         return Response({"classes": classes_data})
+
+
+class StageaireFichierRenseignementView(APIView):
+    """Stagiaire uploads/downloads/deletes their own fichier de renseignement."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_STAGIAIRE:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        if request.query_params.get("status") == "1":
+            return Response({
+                "has_fichier": bool(profile.fichier_renseignement),
+                "nom_fichier": profile.nom_fichier_renseignement or "",
+            })
+        if not profile.fichier_renseignement:
+            return Response({"detail": "no file"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "nom_fichier": profile.nom_fichier_renseignement,
+            "mime_type": profile.mime_type_renseignement,
+            "fichier_base64": base64.b64encode(bytes(profile.fichier_renseignement)).decode(),
+        })
+
+    def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_STAGIAIRE:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        fichier_base64 = request.data.get("fichier_base64")
+        nom_fichier = request.data.get("nom_fichier", "fichier-renseignement")
+        mime_type = request.data.get("mime_type", "application/octet-stream")
+        if not fichier_base64:
+            return Response({"detail": "fichier_base64 required"}, status=status.HTTP_400_BAD_REQUEST)
+        profile.fichier_renseignement = base64.b64decode(fichier_base64)
+        profile.nom_fichier_renseignement = nom_fichier
+        profile.mime_type_renseignement = mime_type
+        profile.save(update_fields=["fichier_renseignement", "nom_fichier_renseignement", "mime_type_renseignement"])
+        return Response({"detail": "uploaded"})
+
+    def delete(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_STAGIAIRE:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        profile.fichier_renseignement = None
+        profile.nom_fichier_renseignement = ""
+        profile.mime_type_renseignement = ""
+        profile.save(update_fields=["fichier_renseignement", "nom_fichier_renseignement", "mime_type_renseignement"])
+        return Response({"detail": "deleted"})
+
+
+class AdminFichierTemplateView(APIView):
+    """Admin sets/gets the global fichier de renseignement template document."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_ADMIN:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        tpl = FichierRenseignementTemplate.objects.first()
+        if not tpl or not tpl.fichier:
+            if request.query_params.get("download") == "1":
+                return Response({"detail": "no template"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"has_template": False, "nom_fichier": ""})
+        if request.query_params.get("download") == "1":
+            return Response({
+                "nom_fichier": tpl.nom_fichier,
+                "mime_type": tpl.mime_type,
+                "fichier_base64": base64.b64encode(bytes(tpl.fichier)).decode(),
+            })
+        return Response({"has_template": True, "nom_fichier": tpl.nom_fichier})
+
+    def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_ADMIN:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        fichier_base64 = request.data.get("fichier_base64")
+        nom_fichier = request.data.get("nom_fichier", "fichier-renseignement")
+        mime_type = request.data.get("mime_type", "application/octet-stream")
+        if not fichier_base64:
+            return Response({"detail": "fichier_base64 required"}, status=status.HTTP_400_BAD_REQUEST)
+        tpl = FichierRenseignementTemplate.objects.first()
+        if not tpl:
+            tpl = FichierRenseignementTemplate()
+        tpl.fichier = base64.b64decode(fichier_base64)
+        tpl.nom_fichier = nom_fichier
+        tpl.mime_type = mime_type
+        tpl.save()
+        return Response({"detail": "uploaded"})
+
+
+class StageaireDownloadFichierTemplateView(APIView):
+    """Stagiaire downloads the admin-set fichier de renseignement template."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_STAGIAIRE:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        tpl = FichierRenseignementTemplate.objects.first()
+        if not tpl or not tpl.fichier:
+            return Response({"detail": "no template"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "nom_fichier": tpl.nom_fichier,
+            "mime_type": tpl.mime_type,
+            "fichier_base64": base64.b64encode(bytes(tpl.fichier)).decode(),
+        })
+
+
+class AdminFichiersRenseignementView(APIView):
+    """List all fichiers de renseignement uploaded by stagiaires, or download one."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_ADMIN:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        stagiaire_id = request.query_params.get("stagiaire_id")
+        if stagiaire_id:
+            try:
+                sp = UserProfile.objects.select_related("user").get(
+                    user_id=stagiaire_id, role=UserProfile.ROLE_STAGIAIRE
+                )
+            except UserProfile.DoesNotExist:
+                return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
+            if not sp.fichier_renseignement:
+                return Response({"detail": "no file"}, status=status.HTTP_404_NOT_FOUND)
+            return Response({
+                "nom_fichier": sp.nom_fichier_renseignement,
+                "mime_type": sp.mime_type_renseignement,
+                "fichier_base64": base64.b64encode(bytes(sp.fichier_renseignement)).decode(),
+            })
+
+        stagiaires = UserProfile.objects.select_related("user").filter(role=UserProfile.ROLE_STAGIAIRE)
+        return Response([
+            {
+                "stagiaire_id": sp.user_id,
+                "stagiaire_username": sp.user.username,
+                "nom_fichier": sp.nom_fichier_renseignement or "",
+                "has_fichier": bool(sp.fichier_renseignement),
+            }
+            for sp in stagiaires
+        ])
 
 
 class AdminDashboardView(APIView):
@@ -1286,9 +1347,12 @@ class AdminCorpsView(APIView):
             return Response({"detail": "corps not found"}, status=status.HTTP_404_NOT_FOUND)
         code = (request.data.get("code") or corps.code).strip()
         label = (request.data.get("label") or corps.label).strip()
-        duplicate = Corps.objects.exclude(id_corps=corps_id).filter(models.Q(code__iexact=code) | models.Q(label__iexact=label)).exists()
-        if duplicate:
-            return Response({"detail": "corps already exists"}, status=status.HTTP_400_BAD_REQUEST)
+        code_changed = code.lower() != corps.code.lower()
+        label_changed = label.lower() != corps.label.lower()
+        if code_changed and Corps.objects.exclude(pk=corps.pk).filter(code__iexact=code).exists():
+            return Response({"detail": "Un corps avec ce code existe déjà."}, status=status.HTTP_400_BAD_REQUEST)
+        if label_changed and Corps.objects.exclude(pk=corps.pk).filter(label__iexact=label).exists():
+            return Response({"detail": "Un corps avec ce libellé existe déjà."}, status=status.HTTP_400_BAD_REQUEST)
         corps.code = code
         corps.label = label
         corps.save(update_fields=["code", "label"])
@@ -1300,6 +1364,25 @@ class AdminCorpsView(APIView):
             message=f"Admin updated corps {corps.label}",
         )
         return Response({"id": corps.id_corps, "code": corps.code, "label": corps.label})
+
+    def delete(self, request, corps_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        permission_error = ensure_reference_manager(profile)
+        if permission_error:
+            return permission_error
+        corps = Corps.objects.filter(id_corps=corps_id).first()
+        if not corps:
+            return Response({"detail": "corps not found"}, status=status.HTTP_404_NOT_FOUND)
+        label = corps.label
+        corps.delete()
+        log_event(
+            request=request,
+            event_type="admin.reference.corps.deleted",
+            target_type="corps",
+            target_id=corps_id,
+            message=f"Admin deleted corps {label}",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminRanksView(APIView):
@@ -1348,11 +1431,13 @@ class AdminRanksView(APIView):
                 return Response({"detail": "corps not found"}, status=status.HTTP_400_BAD_REQUEST)
         code = (request.data.get("code") or rank.code).strip()
         label = (request.data.get("label") or rank.label).strip()
-        duplicate = Rank.objects.exclude(id_rank=rank_id).filter(
-            models.Q(code__iexact=code) | (models.Q(label__iexact=label) & models.Q(corps=target_corps))
-        ).exists()
-        if duplicate:
-            return Response({"detail": "rank already exists"}, status=status.HTTP_400_BAD_REQUEST)
+        code_changed = code.lower() != rank.code.lower()
+        label_changed = label.lower() != rank.label.lower()
+        corps_changed = target_corps.pk != rank.corps_id
+        if code_changed and Rank.objects.exclude(pk=rank.pk).filter(code__iexact=code).exists():
+            return Response({"detail": "Un grade avec ce code existe déjà."}, status=status.HTTP_400_BAD_REQUEST)
+        if (label_changed or corps_changed) and Rank.objects.exclude(pk=rank.pk).filter(label__iexact=label, corps=target_corps).exists():
+            return Response({"detail": "Un grade avec ce libellé existe déjà dans ce corps."}, status=status.HTTP_400_BAD_REQUEST)
         rank.code = code
         rank.label = label
         rank.corps = target_corps
@@ -1366,6 +1451,25 @@ class AdminRanksView(APIView):
             metadata={"corps_id": rank.corps_id},
         )
         return Response({"id": rank.id_rank, "code": rank.code, "label": rank.label, "corps_id": rank.corps_id})
+
+    def delete(self, request, rank_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        permission_error = ensure_reference_manager(profile)
+        if permission_error:
+            return permission_error
+        rank = Rank.objects.filter(id_rank=rank_id).first()
+        if not rank:
+            return Response({"detail": "rank not found"}, status=status.HTTP_404_NOT_FOUND)
+        label = rank.label
+        rank.delete()
+        log_event(
+            request=request,
+            event_type="admin.reference.rank.deleted",
+            target_type="rank",
+            target_id=rank_id,
+            message=f"Admin deleted rank {label}",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminSpecialitiesView(APIView):
@@ -1421,11 +1525,12 @@ class AdminSpecialitiesView(APIView):
                 return Response({"detail": "corps not found"}, status=status.HTTP_400_BAD_REQUEST)
         code = (request.data.get("code") or speciality.code).strip()
         label = (request.data.get("label") or speciality.label).strip()
-        duplicate = Speciality.objects.exclude(id_speciality=speciality_id).filter(
-            models.Q(code__iexact=code) | models.Q(label__iexact=label)
-        ).exists()
-        if duplicate:
-            return Response({"detail": "speciality already exists"}, status=status.HTTP_400_BAD_REQUEST)
+        code_changed = code.lower() != speciality.code.lower()
+        label_changed = label.lower() != speciality.label.lower()
+        if code_changed and Speciality.objects.exclude(pk=speciality.pk).filter(code__iexact=code).exists():
+            return Response({"detail": "Une spécialité avec ce code existe déjà."}, status=status.HTTP_400_BAD_REQUEST)
+        if label_changed and Speciality.objects.exclude(pk=speciality.pk).filter(label__iexact=label).exists():
+            return Response({"detail": "Une spécialité avec ce libellé existe déjà."}, status=status.HTTP_400_BAD_REQUEST)
         speciality.code = code
         speciality.label = label
         speciality.corps = target_corps
@@ -1439,6 +1544,25 @@ class AdminSpecialitiesView(APIView):
             metadata={"corps_id": speciality.corps_id} if speciality.corps_id else {},
         )
         return Response({"id": speciality.id_speciality, "code": speciality.code, "label": speciality.label, "corps_id": speciality.corps_id})
+
+    def delete(self, request, speciality_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        permission_error = ensure_reference_manager(profile)
+        if permission_error:
+            return permission_error
+        speciality = Speciality.objects.filter(id_speciality=speciality_id).first()
+        if not speciality:
+            return Response({"detail": "speciality not found"}, status=status.HTTP_404_NOT_FOUND)
+        label = speciality.label
+        speciality.delete()
+        log_event(
+            request=request,
+            event_type="admin.reference.speciality.deleted",
+            target_type="speciality",
+            target_id=speciality_id,
+            message=f"Admin deleted speciality {label}",
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class AdminSubjectsView(APIView):

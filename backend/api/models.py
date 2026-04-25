@@ -12,14 +12,12 @@ class UserProfile(models.Model):
     ROLE_INSTRUCTEUR = "Instructeur"
     ROLE_STAGIAIRE = "Stagiaire"
     ROLE_ADMIN = "Admin"
-    ROLE_SUPERVISEUR = "Superviseur"
     ROLE_COORDINATEUR = "Coordinateur"
 
     ROLE_CHOICES = [
         (ROLE_INSTRUCTEUR, "Instructeur"),
         (ROLE_STAGIAIRE, "Stagiaire"),
         (ROLE_ADMIN, "Admin"),
-        (ROLE_SUPERVISEUR, "Superviseur"),
         (ROLE_COORDINATEUR, "Coordinateur"),
     ]
 
@@ -30,9 +28,23 @@ class UserProfile(models.Model):
     corps = models.ForeignKey("Corps", on_delete=models.SET_NULL, null=True, blank=True, related_name="profiles")
     rank = models.ForeignKey("Rank", on_delete=models.SET_NULL, null=True, blank=True, related_name="profiles")
     speciality = models.ForeignKey("Speciality", on_delete=models.SET_NULL, null=True, blank=True, related_name="profiles")
+    fichier_renseignement = models.BinaryField(null=True, blank=True)
+    nom_fichier_renseignement = models.CharField(max_length=255, blank=True, default="")
+    mime_type_renseignement = models.CharField(max_length=100, blank=True, default="")
 
     def __str__(self):
         return f"{self.user.username} ({self.role})"
+
+
+class FichierRenseignementTemplate(models.Model):
+    """Singleton model: stores the template document set by admin for stagiaires to download."""
+    fichier = models.BinaryField(null=True, blank=True)
+    nom_fichier = models.CharField(max_length=255, blank=True, default="")
+    mime_type = models.CharField(max_length=100, blank=True, default="")
+    uploaded_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Template: {self.nom_fichier or '(none)'}"
 
 
 class Specialite(models.Model):

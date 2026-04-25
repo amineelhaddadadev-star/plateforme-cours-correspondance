@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import PdfViewer, { InlinePdfViewer } from "./PdfViewer";
+import PdfViewer, { InlinePdfViewer, InlineDocxViewer } from "./PdfViewer";
 import { useTranslation } from "react-i18next";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
@@ -16,6 +16,17 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 
 type MeResponse = {
   id: number;
@@ -30,7 +41,7 @@ type MeResponse = {
 };
 type TokenResponse = { access: string; refresh: string };
 type RefreshResponse = { access: string };
-type Role = "Instructeur" | "Stagiaire" | "Admin" | "Superviseur" | "Coordinateur";
+type Role = "Instructeur" | "Stagiaire" | "Admin" | "Coordinateur";
 
 type InstructeurDashboardData = {
   role: Role;
@@ -57,32 +68,6 @@ type StageaireDashboardData = {
   notes: Array<{ controle: string; note: string; published_at: string | null }>;
   sujet_fin_stage: { titre: string; description: string; etat: string; encadrant: string; date_affectation: string } | null;
   notifications: { unread_count: number; latest: Array<{ id: string; title: string; message: string; type: string; created_at: string }> };
-};
-
-type SuperviseurDashboardData = {
-  role: Role;
-  monitoring: {
-    classes_count: number;
-    brigades_count: number;
-    controles_count: number;
-    published_notes_count: number;
-    stagiaires_count: number;
-  };
-  classes: Array<{
-    classe_code: string;
-    brigade_code: string;
-    stagiaires_count: number;
-    controles_count: number;
-    notes_published_count: number;
-    note_moyenne: number | null;
-  }>;
-  recent_activities: Array<{
-    type: string;
-    label: string;
-    status: string;
-    date: string | null;
-  }>;
-  notifications: { unread_count: number };
 };
 
 type CoordinateurDashboardData = {
@@ -189,15 +174,78 @@ type AdminEventData = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+/** Normalize a string for accent/case-insensitive matching */
+const normStr = (s: string) =>
+  s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/**
+ * Obligatoire brochure names from the official programme table (image).
+ * Each entry is a normalized fragment that must be contained in the brochure name.
+ * Being explicit avoids false positives on similar names like "Système d'exploitation"
+ * vs "Aperçu sur les Systèmes d'exploitation".
+ */
+const OBLIGATOIRE_FRAGMENTS: string[] = [
+  // Bureautiques & Architectures
+  "analyse des donnees avec excel",
+  "structure et fonctionnement des ordinateurs",
+  "apercu sur les systemes d exploitation",   // "Aperçu sur les Systèmes d'exploitation"
+  // Algorithmique & Programmation
+  "initiation a l algorithmique",             // "Initiation à l'Algorithmique"
+  "langage de programmation c",
+  "algorithmique, structures de donnees",     // "Algorithmique, Structures de données et programmation en"
+  "algorithmique structures de donnees",
+  // Bases de données & Modélisation
+  "systeme d information et merise",          // "Système d'information et MERISE"
+  "merise-exercices",                         // "MERISE-Exercices et corrigés"
+  "merise exercices",
+  "introduction aux bases de donnees",        // "Introduction aux bases de données et langage SQL"
+  // Systèmes, Réseaux & SSI
+  "initiation au systeme d exploitation unix",// "Initiation au système d'exploitation UNIX"
+  "initiation aux reseaux",                   // "Initiation aux réseaux"
+  "securite system en informatique",          // "Sécurité system en informatique"
+  // Architectures & Développement Web
+  "architectures web",                        // "Architectures Web"
+  "developpement web avec html",              // "Développement web avec HTML et CSS"
+];
+
+/** Returns "obligatoire" if the brochure name contains one of the official mandatory fragments */
+const getTag = (nom: string): "obligatoire" | "recommande" => {
+  // Normalise: remove diacritics, lowercase, collapse apostrophes/hyphens to space
+  const n = normStr(nom).trim().replace(/['\u2019-]/g, " ").replace(/\s+/g, " ");
+  if (OBLIGATOIRE_FRAGMENTS.some((f) => n.includes(f))) return "obligatoire";
+  return "recommande";
+};
+
+const TagBadge = ({ nom, className = "" }: { nom: string; className?: string }) => {
+  const tag = getTag(nom);
+  if (tag === "obligatoire") {
+    return (
+      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${className}`} style={{ background: "#fee2e2", color: "#b91c1c" }}>
+        Obligatoire
+      </span>
+    );
+  }
+  return (
+    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${className}`} style={{ background: "#dbeafe", color: "#1d4ed8" }}>
+      Recommandé
+    </span>
+  );
+};
+
+// Keep old alias used on course cards
+const CourseTagBadge = ({ titre }: { titre: string }) => <TagBadge nom={titre} />;
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
-const ROLE_OPTIONS: Role[] = ["Instructeur", "Stagiaire", "Superviseur", "Coordinateur"];
+const ROLE_OPTIONS: Role[] = ["Instructeur", "Stagiaire", "Coordinateur"];
 
 function Layout({
   user,
+  onLogout,
   children,
 }: {
   user: MeResponse | null;
+  onLogout: () => void;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -226,14 +274,9 @@ function Layout({
                 <HeaderLink to="/dashboard">
                   {user.role === "Admin" ? t("workspace.Admin.title") : t("nav.dashboard")}
                 </HeaderLink>
-                <Link
-                  aria-label={t("nav.settings")}
-                  className="inline-flex h-10 w-10 items-center justify-center text-2xl font-bold text-app-dark transition hover:text-app-accent"
-                  title={t("nav.settings")}
-                  to="/settings"
-                >
-                  <span aria-hidden="true">⚙</span>
-                </Link>
+                <Button onClick={onLogout} size="small" sx={{ textTransform: "none", fontWeight: 600 }} variant="text">
+                  {t("nav.logout")}
+                </Button>
               </>
             )}
           </nav>
@@ -288,6 +331,67 @@ function MetricCard({ label, value }: { label: string; value: string | number })
     <div className="rounded-lg border border-app-muted/70 bg-app-soft px-3 py-2">
       <p className="text-xs uppercase tracking-[0.08em] text-app-dark/70">{label}</p>
       <p className="mt-1 text-lg font-semibold">{value}</p>
+    </div>
+  );
+}
+
+const PLATFORM_COLORS = ["#6366f1", "#10b981", "#06b6d4", "#f59e0b", "#ec4899"];
+
+function AdminPlatformChart({ platform }: { platform: { users_total: number; users_active: number; cours_total: number; controles_total: number; soumissions_total: number } }) {
+  const data = [
+    { name: "Utilisateurs", value: platform.users_total },
+    { name: "Actifs", value: platform.users_active },
+    { name: "Cours", value: platform.cours_total },
+    { name: "Contrôles", value: platform.controles_total },
+  ];
+  return (
+    <div className="mt-3 h-52" style={{ minWidth: 0 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+          <Tooltip
+            contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}
+            cursor={{ fill: "#f1f5f9" }}
+          />
+          <Bar dataKey="value" name="Valeur" radius={[4, 4, 0, 0]} maxBarSize={56}>
+            {data.map((_, i) => (
+              <Cell key={i} fill={PLATFORM_COLORS[i % PLATFORM_COLORS.length]} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function AdminRoleChart({ users, onRoleClick }: { users: { role: string; is_active: boolean }[]; onRoleClick: (role: string) => void }) {
+  const roles = ["Stagiaire", "Instructeur", "Coordinateur", "Admin"] as const;
+  const data = roles.map((role) => ({
+    name: role,
+    Total: users.filter((u) => u.role === role).length,
+    Actifs: users.filter((u) => u.role === role && u.is_active).length,
+  }));
+  return (
+    <div className="mt-3 h-52" style={{ minWidth: 0 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}
+          onClick={(e) => { if (e?.activeLabel) onRoleClick(e.activeLabel); }}
+          style={{ cursor: "pointer" }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+          <Tooltip
+            contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}
+            cursor={{ fill: "#f1f5f9" }}
+          />
+          <Legend wrapperStyle={{ fontSize: 12, paddingTop: 4 }} />
+          <Bar dataKey="Total" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={32} />
+          <Bar dataKey="Actifs" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={32} />
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }
@@ -353,9 +457,12 @@ type ReferenceManagementSectionProps = {
   handleCreateCorps: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   handleCreateRank: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   handleCreateSpeciality: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  handleRenameCorps: (corpsId: string, current: string) => void;
-  handleRenameRank: (rankId: string, current: string) => void;
-  handleRenameSpeciality: (specialityId: string, current: string) => void;
+  handleRenameCorps: (corpsId: string, label: string, code: string) => void;
+  handleRenameRank: (rankId: string, label: string, code: string, corpsId: string) => void;
+  handleRenameSpeciality: (specialityId: string, label: string, code: string, corpsId: string) => void;
+  handleDeleteCorps: (corpsId: string, label: string) => void;
+  handleDeleteRank: (rankId: string, label: string) => void;
+  handleDeleteSpeciality: (specialityId: string, label: string) => void;
 };
 
 function ReferenceManagementSection({
@@ -374,12 +481,15 @@ function ReferenceManagementSection({
   handleRenameCorps,
   handleRenameRank,
   handleRenameSpeciality,
+  handleDeleteCorps,
+  handleDeleteRank,
+  handleDeleteSpeciality,
 }: ReferenceManagementSectionProps) {
   return (
     <div className="grid gap-6">
       <PanelSection title="Corps, ranks et specialities">
         <p className="text-sm text-app-dark/70">
-          Ces tables sont bootstrappées à partir des données des corps et peuvent être ajustées par les superviseurs au besoin.
+          Gérez les corps, grades et spécialités militaires. Ces données sont créées et administrées par l'administrateur.
         </p>
       </PanelSection>
 
@@ -406,14 +516,13 @@ function ReferenceManagementSection({
           </form>
           <div className="mt-3 space-y-2">
             {referencesData.corps.map((corp) => (
-              <button
-                className="w-full rounded border border-app-muted px-2 py-1 text-left text-xs hover:bg-app-soft"
-                key={corp.id}
-                onClick={() => void handleRenameCorps(corp.id, corp.label)}
-                type="button"
-              >
-                {corp.label} ({corp.code})
-              </button>
+              <div key={corp.id} className="flex items-center justify-between rounded border border-app-muted px-2 py-1">
+                <span className="text-xs">{corp.label} <span className="text-app-dark/50">({corp.code})</span></span>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => handleRenameCorps(corp.id, corp.label, corp.code)} className="rounded px-2 py-0.5 text-[11px] font-medium text-app-dark border border-app-muted hover:bg-app-soft">Éditer</button>
+                  <button type="button" onClick={() => void handleDeleteCorps(corp.id, corp.label)} className="rounded px-2 py-0.5 text-[11px] font-medium text-red-600 border border-red-200 hover:bg-red-50">Supprimer</button>
+                </div>
+              </div>
             ))}
             {referencesData.corps.length === 0 ? <EmptyState message="Aucun corp." /> : null}
           </div>
@@ -446,14 +555,13 @@ function ReferenceManagementSection({
           </form>
           <div className="mt-3 space-y-2">
             {referencesData.ranks.map((rank) => (
-              <button
-                className="w-full rounded border border-app-muted px-2 py-1 text-left text-xs hover:bg-app-soft"
-                key={rank.id}
-                onClick={() => void handleRenameRank(rank.id, rank.label)}
-                type="button"
-              >
-                {rank.label} ({rank.code})
-              </button>
+              <div key={rank.id} className="flex items-center justify-between rounded border border-app-muted px-2 py-1">
+                <span className="text-xs">{rank.label} <span className="text-app-dark/50">({rank.code})</span></span>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => handleRenameRank(rank.id, rank.label, rank.code, rank.corps_id)} className="rounded px-2 py-0.5 text-[11px] font-medium text-app-dark border border-app-muted hover:bg-app-soft">Éditer</button>
+                  <button type="button" onClick={() => void handleDeleteRank(rank.id, rank.label)} className="rounded px-2 py-0.5 text-[11px] font-medium text-red-600 border border-red-200 hover:bg-red-50">Supprimer</button>
+                </div>
+              </div>
             ))}
             {referencesData.ranks.length === 0 ? <EmptyState message="Aucun rank." /> : null}
           </div>
@@ -486,17 +594,16 @@ function ReferenceManagementSection({
           </form>
           <div className="mt-3 space-y-2">
             {referencesData.specialities.map((speciality) => (
-              <button
-                className="w-full rounded border border-app-muted px-2 py-1 text-left text-xs hover:bg-app-soft"
-                key={speciality.id}
-                onClick={() => void handleRenameSpeciality(speciality.id, speciality.label)}
-                type="button"
-              >
-                {speciality.label} ({speciality.code})
-                {speciality.corps_id
-                  ? ` - ${referencesData.corps.find((c) => c.id === speciality.corps_id)?.label ?? ""}`
-                  : ""}
-              </button>
+              <div key={speciality.id} className="flex items-center justify-between rounded border border-app-muted px-2 py-1">
+                <span className="text-xs">
+                  {speciality.label} <span className="text-app-dark/50">({speciality.code})</span>
+                  {speciality.corps_id ? <span className="ml-1 text-app-dark/40">— {referencesData.corps.find((c) => c.id === speciality.corps_id)?.label ?? ""}</span> : null}
+                </span>
+                <div className="flex gap-1">
+                  <button type="button" onClick={() => handleRenameSpeciality(speciality.id, speciality.label, speciality.code, speciality.corps_id ?? "")} className="rounded px-2 py-0.5 text-[11px] font-medium text-app-dark border border-app-muted hover:bg-app-soft">Éditer</button>
+                  <button type="button" onClick={() => void handleDeleteSpeciality(speciality.id, speciality.label)} className="rounded px-2 py-0.5 text-[11px] font-medium text-red-600 border border-red-200 hover:bg-red-50">Supprimer</button>
+                </div>
+              </div>
             ))}
             {referencesData.specialities.length === 0 ? <EmptyState message="Aucune speciality." /> : null}
           </div>
@@ -528,21 +635,8 @@ function HomePage() {
               Enterprise Training Platform
             </p>
             <h1 className="mt-3 text-4xl font-black uppercase leading-tight text-white md:text-5xl">
-              Plateforme de<br />
-              <span style={{ color: "#982598" }}>Cours en Ligne</span>
+              <span style={{ color: "#982598" }}>Plateforme de cours par correspondance</span>
             </h1>
-            <p className="mt-4 text-base text-white/70 leading-relaxed">
-              A modern workspace for people, programs, and progression.
-            </p>
-            <p className="mt-2 text-sm text-white/50">
-              Unified collaboration between{" "}
-              {["Instructeurs", "Stagiaires", "Admins", "Superviseurs", "Coordinateurs"].map((role, i, arr) => (
-                <span key={role}>
-                  <span style={{ color: "#982598" }} className="font-semibold">{role}</span>
-                  {i < arr.length - 1 ? ", " : "."}
-                </span>
-              ))}
-            </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
                 className="rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:opacity-90"
@@ -588,7 +682,7 @@ function HomePage() {
 
             {/* Role pills */}
             <div className="flex flex-wrap justify-center gap-2 mt-1">
-              {["Admin", "Instructeur", "Stagiaire", "Superviseur", "Coordinateur"].map((r) => (
+              {["Admin", "Instructeur", "Stagiaire", "Coordinateur"].map((r) => (
                 <span
                   key={r}
                   className="rounded-full px-3 py-1 text-xs font-semibold text-white/80"
@@ -821,9 +915,6 @@ function DashboardPage({
   const [selectedMatiere, setSelectedMatiere] = useState<{ id: string; nom: string; module_nom: string; brochures: Array<{ id: string; nom: string; cours_count: number }>; cours: Array<{ id: string; titre: string; description: string; instructeur: string; controles_count: number }> } | null>(null);
   const [selectedBrochure, setSelectedBrochure] = useState<{ id: string; nom: string; matiere_nom: string; module_nom: string; cours: Array<{ id: string; titre: string; description: string; instructeur: string; controles_count: number }> } | null>(null);
   const [modulesExpanded, setModulesExpanded] = useState(false);
-  const [superviseurData, setSuperviseurData] = useState<SuperviseurDashboardData | null>(null);
-  const [superviseurSearch, setSuperviseurSearch] = useState("");
-  const [superviseurPerfFilter, setSuperviseurPerfFilter] = useState("all");
   const [coordinateurData, setCoordinateurData] = useState<CoordinateurDashboardData | null>(null);
   const [adminData, setAdminData] = useState<AdminDashboardData | null>(null);
 
@@ -839,7 +930,7 @@ function DashboardPage({
   const [controlPrompt, setControlPrompt] = useState("");
   const [controlEnonceFichier, setControlEnonceFichier] = useState<File | null>(null);
   const [detailControleId, setDetailControleId] = useState<string | null>(null);
-  const [detailControlePdf, setDetailControlePdf] = useState<{ base64: string; name: string } | null>(null);
+  const [detailControlePdf, setDetailControlePdf] = useState<{ base64: string; name: string; mimeType: string } | null>(null);
   const [detailControlePdfLoading, setDetailControlePdfLoading] = useState(false);
   const [submissionAnswers, setSubmissionAnswers] = useState<Record<string, string>>({});
   const [submissionFiles, setSubmissionFiles] = useState<Record<string, File>>({});
@@ -856,7 +947,10 @@ function DashboardPage({
   const [instructeurView, setInstructeurView] = useState<"dashboard" | "cours" | "controles" | "corriger" | "sujet">("dashboard");
   const [stageaireView, setStageaireView] = useState<"dashboard" | "cours" | "controles" | "sujet" | "classement">("dashboard");
   const [coordinateurView, setCoordinateurView] = useState<"dashboard" | "reporting" | "export">("dashboard");
-  const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "subjects" | "classes" | "references" | "events" | "classement">("overview");
+  const [coordNotifDismissed, setCoordNotifDismissed] = useState(false);
+  const [brigadeSearch, setBrigadeSearch] = useState("");
+  const [brigadeFilter, setBrigadeFilter] = useState<"tous" | "reussite" | "surveiller" | "sans_notes">("tous");
+  const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "bulk_csv" | "subjects" | "classes" | "references" | "events" | "classement" | "fichiers_renseignement">("overview");
   const [selectedAdminUser, setSelectedAdminUser] = useState<AdminDashboardData["users"][number] | null>(null);
   const [subjects, setSubjects] = useState<SubjectData[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
@@ -891,6 +985,13 @@ function DashboardPage({
   const [emailResetState, setEmailResetState] = useState<Record<number, "idle" | "loading" | "sent" | "no_email" | "error">>({});
   const [classementData, setClassementData] = useState<StageaireClassementData | null>(null);
   const [adminClassementData, setAdminClassementData] = useState<AdminClassementData | null>(null);
+  const [adminFichiersRenseignement, setAdminFichiersRenseignement] = useState<Array<{ stagiaire_id: number; stagiaire_username: string; sujet_titre: string; nom_fichier: string; etat: string; has_fichier: boolean }> | null>(null);
+  const [adminFichierTemplate, setAdminFichierTemplate] = useState<{ has_template: boolean; nom_fichier: string } | null>(null);
+  const [adminPreviewFichier, setAdminPreviewFichier] = useState<{ base64: string; nom_fichier: string; mime_type: string } | null>(null);
+  const [adminFichierTemplateFile, setAdminFichierTemplateFile] = useState<File | null>(null);
+  const [stagiaireFichierStatus, setStagiaireFichierStatus] = useState<{ has_fichier: boolean; nom_fichier: string } | null>(null);
+  const [stagiaireFichierUploadFile, setStagiaireFichierUploadFile] = useState<File | null>(null);
+  const [stagiaireFichierUploading, setStagiaireFichierUploading] = useState(false);
   const [csvFileName, setCsvFileName] = useState("");
   const [csvErrors, setCsvErrors] = useState<Array<{ line: number; error: string }>>([]);
   const [classesData, setClassesData] = useState<AdminClassData[]>([]);
@@ -916,7 +1017,9 @@ function DashboardPage({
     target: "corps" | "rank" | "speciality" | null;
     id: string;
     value: string;
-  }>({ open: false, target: null, id: "", value: "" });
+    code: string;
+    corps_id: string;
+  }>({ open: false, target: null, id: "", value: "", code: "", corps_id: "" });
 
   useEffect(() => {
     void onLoadProfile();
@@ -955,7 +1058,6 @@ function DashboardPage({
     }
     if (user.role === "Instructeur") document.title = `${t("titles.instructorDashboard")} - ${t("titles.appName")}`;
     if (user.role === "Stagiaire") document.title = `${t("titles.traineeDashboard")} - ${t("titles.appName")}`;
-    if (user.role === "Superviseur") document.title = `${t("titles.supervisorDashboard")} - ${t("titles.appName")}`;
     if (user.role === "Coordinateur") document.title = `${t("titles.coordinatorDashboard")} - ${t("titles.appName")}`;
   }, [user, adminView, selectedAdminUser, subjectTab, referenceTab, t]);
 
@@ -984,12 +1086,7 @@ function DashboardPage({
         if (!response.ok) throw new Error("failed");
         const data: StageaireDashboardData = await response.json();
         setStageaireData(data);
-      } else if (user.role === "Superviseur") {
-        const response = await apiFetch("/api/dashboard/superviseur/");
-        if (response.status === 403) { onSessionInvalid(); return; }
-        if (!response.ok) throw new Error("failed");
-        const data: SuperviseurDashboardData = await response.json();
-        setSuperviseurData(data);
+        void loadStagiaireFichierStatus();
       } else if (user.role === "Coordinateur") {
         const response = await apiFetch("/api/dashboard/coordinateur/");
         if (response.status === 403) { onSessionInvalid(); return; }
@@ -1034,20 +1131,18 @@ function DashboardPage({
 
   useEffect(() => {
     if (!user || user.role !== "Admin") return;
-    if (adminView === "users" || adminView === "accounts" || adminView === "classes") {
+    if (adminView === "users" || adminView === "accounts" || adminView === "bulk_csv" || adminView === "classes") {
       void reloadAdminData();
     }
     if (adminView === "classement") {
       void loadAdminClassement();
     }
+    if (adminView === "fichiers_renseignement") {
+      void loadAdminFichiersRenseignement();
+      void loadAdminFichierTemplate();
+    }
   }, [adminView]);
 
-  useEffect(() => {
-    if (!user || user.role !== "Stagiaire") return;
-    if (stageaireView === "classement") {
-      void loadClassement();
-    }
-  }, [stageaireView]);
 
   const loadClassement = async () => {
     const r = await apiFetch("/api/stageaire/classement/");
@@ -1057,6 +1152,74 @@ function DashboardPage({
   const loadAdminClassement = async () => {
     const r = await apiFetch("/api/admin/classement/");
     if (r.ok) { const d: AdminClassementData = await r.json(); setAdminClassementData(d); }
+  };
+
+  const loadAdminFichiersRenseignement = async () => {
+    const r = await apiFetch("/api/admin/fichiers-renseignement/");
+    if (r.ok) { const d = await r.json(); setAdminFichiersRenseignement(d); }
+  };
+
+  const handleAdminDownloadFichierRenseignement = async (stagiaireId: number, nomFichier: string) => {
+    const r = await apiFetch(`/api/admin/fichiers-renseignement/?stagiaire_id=${stagiaireId}`);
+    if (!r.ok) return;
+    const data: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(data.fichier_base64, nomFichier || "fichier-renseignement", data.mime_type);
+  };
+
+  const handleAdminPreviewFichierRenseignement = async (stagiaireId: number) => {
+    const r = await apiFetch(`/api/admin/fichiers-renseignement/?stagiaire_id=${stagiaireId}`);
+    if (!r.ok) return;
+    const data: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    setAdminPreviewFichier({ base64: data.fichier_base64, nom_fichier: data.nom_fichier, mime_type: data.mime_type });
+  };
+
+  const loadAdminFichierTemplate = async () => {
+    const r = await apiFetch("/api/admin/fichier-template/");
+    if (r.ok) { const d: { has_template: boolean; nom_fichier: string } = await r.json(); setAdminFichierTemplate(d); }
+  };
+
+  const handleAdminUploadFichierTemplate = async () => {
+    if (!adminFichierTemplateFile) return;
+    const fichier_base64 = await readFileAsBase64(adminFichierTemplateFile);
+    const r = await apiFetch("/api/admin/fichier-template/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fichier_base64, nom_fichier: adminFichierTemplateFile.name, mime_type: adminFichierTemplateFile.type || "application/octet-stream" }),
+    });
+    if (r.ok) { setAdminFichierTemplateFile(null); void loadAdminFichierTemplate(); }
+  };
+
+  const handleAdminDownloadFichierTemplate = async () => {
+    const r = await apiFetch("/api/admin/fichier-template/?download=1");
+    if (!r.ok) return;
+    const data: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(data.fichier_base64, data.nom_fichier || "fichier-renseignement-modele", data.mime_type);
+  };
+
+  const loadStagiaireFichierStatus = async () => {
+    const r = await apiFetch("/api/stageaire/fichier-renseignement/?status=1");
+    if (r.ok) { const d: { has_fichier: boolean; nom_fichier: string } = await r.json(); setStagiaireFichierStatus(d); }
+    else { setStagiaireFichierStatus({ has_fichier: false, nom_fichier: "" }); }
+  };
+
+  const handleStageaireDownloadTemplate = async () => {
+    const r = await apiFetch("/api/stageaire/fichier-template/");
+    if (!r.ok) return;
+    const data: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(data.fichier_base64, data.nom_fichier || "fichier-renseignement", data.mime_type);
+  };
+
+  const handleStageaireUploadFichierRenseignement = async () => {
+    if (!stagiaireFichierUploadFile) return;
+    setStagiaireFichierUploading(true);
+    const fichier_base64 = await readFileAsBase64(stagiaireFichierUploadFile);
+    const r = await apiFetch("/api/stageaire/fichier-renseignement/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fichier_base64, nom_fichier: stagiaireFichierUploadFile.name, mime_type: stagiaireFichierUploadFile.type || "application/octet-stream" }),
+    });
+    setStagiaireFichierUploading(false);
+    if (r.ok) { setStagiaireFichierUploadFile(null); void loadStagiaireFichierStatus(); }
   };
 
   const handleCreateCourse = async (event: FormEvent<HTMLFormElement>) => {
@@ -1487,16 +1650,43 @@ function DashboardPage({
     }
   };
 
-  const handleRenameCorps = async (corpsId: string, current: string) => {
-    setRenameModal({ open: true, target: "corps", id: corpsId, value: current });
+  const handleRenameCorps = (corpsId: string, current: string, currentCode: string) => {
+    setRenameModal({ open: true, target: "corps", id: corpsId, value: current, code: currentCode, corps_id: "" });
   };
 
-  const handleRenameRank = async (rankId: string, current: string) => {
-    setRenameModal({ open: true, target: "rank", id: rankId, value: current });
+  const handleRenameRank = (rankId: string, current: string, currentCode: string, currentCorpsId: string) => {
+    setRenameModal({ open: true, target: "rank", id: rankId, value: current, code: currentCode, corps_id: currentCorpsId });
   };
 
-  const handleRenameSpeciality = async (specialityId: string, current: string) => {
-    setRenameModal({ open: true, target: "speciality", id: specialityId, value: current });
+  const handleRenameSpeciality = (specialityId: string, current: string, currentCode: string, currentCorpsId: string) => {
+    setRenameModal({ open: true, target: "speciality", id: specialityId, value: current, code: currentCode, corps_id: currentCorpsId });
+  };
+
+  const handleDeleteCorps = async (corpsId: string, label: string) => {
+    if (!window.confirm(`Supprimer le corps « ${label} » ? Cette action supprimera aussi tous les grades associés.`)) return;
+    const response = await apiFetch(`/api/admin/references/corps/${corpsId}/`, { method: "DELETE" });
+    if (response.ok || response.status === 204) {
+      setActionMessage(`Corps « ${label} » supprimé.`);
+      await loadAdminReferences();
+    }
+  };
+
+  const handleDeleteRank = async (rankId: string, label: string) => {
+    if (!window.confirm(`Supprimer le grade « ${label} » ?`)) return;
+    const response = await apiFetch(`/api/admin/references/ranks/${rankId}/`, { method: "DELETE" });
+    if (response.ok || response.status === 204) {
+      setActionMessage(`Grade « ${label} » supprimé.`);
+      await loadAdminReferences();
+    }
+  };
+
+  const handleDeleteSpeciality = async (specialityId: string, label: string) => {
+    if (!window.confirm(`Supprimer la spécialité « ${label} » ?`)) return;
+    const response = await apiFetch(`/api/admin/references/specialities/${specialityId}/`, { method: "DELETE" });
+    if (response.ok || response.status === 204) {
+      setActionMessage(`Spécialité « ${label} » supprimée.`);
+      await loadAdminReferences();
+    }
   };
 
   const handleSubmitRename = async (event: FormEvent<HTMLFormElement>) => {
@@ -1508,15 +1698,18 @@ function DashboardPage({
         : renameModal.target === "rank"
           ? `/api/admin/references/ranks/${renameModal.id}/`
           : `/api/admin/references/specialities/${renameModal.id}/`;
+    const body: Record<string, string> = { label: renameModal.value.trim(), code: renameModal.code.trim() };
+    if (renameModal.corps_id) body.corps_id = renameModal.corps_id;
+    console.log("[edit] sending PATCH", endpoint, body);
     const response = await apiFetch(endpoint, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label: renameModal.value.trim() }),
+      body: JSON.stringify(body),
     });
     if (response.ok) {
       const typeLabel = renameModal.target === "corps" ? "Corps" : renameModal.target === "rank" ? "Grade" : "Spécialité";
-      setActionMessage(`${typeLabel} renommé en « ${renameModal.value.trim()} ».`);
-      setRenameModal({ open: false, target: null, id: "", value: "" });
+      setActionMessage(`${typeLabel} « ${renameModal.value.trim()} » mis à jour.`);
+      setRenameModal({ open: false, target: null, id: "", value: "", code: "", corps_id: "" });
       await loadAdminReferences();
     }
   };
@@ -1576,7 +1769,7 @@ function DashboardPage({
     const response = await apiFetch(`/api/stageaire/controles/${controleId}/fichier/`);
     if (response.ok) {
       const data: { fichier_base64: string; nom_fichier: string; mime_type: string } = await response.json();
-      setDetailControlePdf({ base64: data.fichier_base64, name: data.nom_fichier || "enonce.pdf" });
+      setDetailControlePdf({ base64: data.fichier_base64, name: data.nom_fichier || "enonce", mimeType: data.mime_type || "" });
     }
     setDetailControlePdfLoading(false);
   };
@@ -1598,7 +1791,7 @@ function DashboardPage({
         void loadSubjects();
         void loadClasses();
       }
-      if (user.role === "Admin" || user.role === "Superviseur") {
+      if (user.role === "Admin") {
         void loadAdminReferences();
       }
     }, [user?.role]);
@@ -1759,6 +1952,9 @@ function DashboardPage({
                       const isPdf = cached
                         ? cached.mimeType === "application/pdf" || cached.name.toLowerCase().endsWith(".pdf")
                         : f.mime_type === "application/pdf" || f.nom_fichier.toLowerCase().endsWith(".pdf");
+                      const isDocx = cached
+                        ? cached.name.toLowerCase().endsWith(".docx") || cached.name.toLowerCase().endsWith(".doc")
+                        : f.nom_fichier.toLowerCase().endsWith(".docx") || f.nom_fichier.toLowerCase().endsWith(".doc");
 
                       if (!cached) {
                         return (
@@ -1773,13 +1969,25 @@ function DashboardPage({
                         return <InlinePdfViewer key={f.id_cours_fichier} base64={cached.base64} name={cached.name} />;
                       }
 
+                      if (isDocx) {
+                        return <InlineDocxViewer key={f.id_cours_fichier} base64={cached.base64} name={cached.name} />;
+                      }
+
                       return (
                         <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
                           <span className="text-base">📎</span>
-                          <div>
-                            <p className="text-sm font-semibold text-app-dark">{f.nom_fichier}</p>
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold text-app-dark">{cached.name}</p>
                             <p className="text-xs text-app-dark/40">Aperçu non disponible pour ce format</p>
                           </div>
+                          <button
+                            type="button"
+                            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
+                            style={{ background: "#982598" }}
+                            onClick={() => triggerDownload(cached.base64, cached.name, cached.mimeType)}
+                          >
+                            ↓ Télécharger
+                          </button>
                         </div>
                       );
                     })
@@ -2447,29 +2655,6 @@ function DashboardPage({
                 );
               })}
 
-              {/* Classement */}
-              {(["classement"] as const).map((tab) => {
-                const active = stageaireView === tab;
-                return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); }}
-                    className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
-                  >
-                    <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    <span className="flex-1">Classement</span>
-                    {stageaireData.notes.length > 0 && (
-                      <span className="shrink-0 rounded-full px-1.5 py-0.5 text-xs font-bold leading-none" style={{ background: active ? "rgba(255,255,255,0.2)" : "#e5e7eb", color: active ? "white" : "#374151" }}>
-                        {stageaireData.notes.length}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
 
               {/* Sujet fin de stage */}
               {(["sujet"] as const).map((tab) => {
@@ -2644,6 +2829,39 @@ function DashboardPage({
                         </div>
                       ))}
                     </div>
+                    {/* Fichier de renseignement — only shown until submitted */}
+                    {stagiaireFichierStatus !== null && !stagiaireFichierStatus.has_fichier && (
+                      <div className="border-t border-app-muted/60 pt-3 mt-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Fichier de renseignement</p>
+                        <div className="flex flex-col gap-2">
+                          <button
+                            className="flex items-center gap-2 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark hover:border-app-dark/30 hover:bg-white transition"
+                            onClick={() => void handleStageaireDownloadTemplate()}
+                            type="button"
+                          >
+                            <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            Telecharger Fichier de renseignement
+                          </button>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-app-muted bg-white px-2.5 py-1.5 text-xs font-medium text-app-dark hover:border-app-dark/30 transition min-w-0">
+                              <svg className="h-3 w-3 shrink-0 text-app-dark/50" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                              <span className="truncate max-w-[120px]">{stagiaireFichierUploadFile ? stagiaireFichierUploadFile.name : "Choisir un fichier"}</span>
+                              <input type="file" className="hidden" onChange={(e) => setStagiaireFichierUploadFile(e.target.files?.[0] ?? null)} />
+                            </label>
+                            <button
+                              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition disabled:opacity-40"
+                              style={{ background: "#15173D" }}
+                              disabled={!stagiaireFichierUploadFile || stagiaireFichierUploading}
+                              onClick={() => void handleStageaireUploadFichierRenseignement()}
+                              type="button"
+                            >
+                              <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                              {stagiaireFichierUploading ? "Envoi..." : "Soumettre"}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </article>
 
                   {/* Classes + notes */}
@@ -2687,7 +2905,6 @@ function DashboardPage({
                   </article>
                 </div>
 
-                {/* Notifications */}
                 {stageaireData.notifications.latest.length > 0 && (
                   <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
                     <div className="flex items-center justify-between mb-3">
@@ -2840,7 +3057,10 @@ function DashboardPage({
                             <svg className="h-4 w-4 text-app-dark" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm text-app-dark truncate">{b.nom}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-semibold text-sm text-app-dark truncate">{b.nom}</p>
+                              <TagBadge nom={b.nom} />
+                            </div>
                             <p className="mt-0.5 text-xs text-app-dark/50">{b.cours_count} cours</p>
                           </div>
                           {b.cours_count > 0 ? (
@@ -2864,7 +3084,10 @@ function DashboardPage({
                               <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="font-semibold text-sm text-app-dark leading-snug">{c.titre}</p>
+                              <div className="flex items-start gap-2 flex-wrap mb-0.5">
+                                <p className="font-semibold text-sm text-app-dark leading-snug">{c.titre}</p>
+                                <CourseTagBadge titre={c.titre} />
+                              </div>
                               {c.description && <p className="mt-0.5 text-xs text-app-dark/50 line-clamp-2">{c.description}</p>}
                               <div className="mt-2 flex items-center gap-2 flex-wrap">
                                 <span className="text-xs text-app-dark/40">{c.instructeur}</span>
@@ -2905,7 +3128,10 @@ function DashboardPage({
                 </nav>
 
                 <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Cours — {selectedBrochure.nom}</p>
+                  <div className="flex items-center gap-3 flex-wrap mb-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours — {selectedBrochure.nom}</p>
+                    <TagBadge nom={selectedBrochure.nom} />
+                  </div>
                   {selectedBrochure.cours.length > 0 ? (
                     <div className="grid gap-3 md:grid-cols-2">
                       {selectedBrochure.cours.map((c) => (
@@ -2915,7 +3141,10 @@ function DashboardPage({
                             <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm text-app-dark leading-snug">{c.titre}</p>
+                            <div className="flex items-start gap-2 flex-wrap mb-0.5">
+                              <p className="font-semibold text-sm text-app-dark leading-snug">{c.titre}</p>
+                              <CourseTagBadge titre={c.titre} />
+                            </div>
                             {c.description && <p className="mt-0.5 text-xs text-app-dark/50 line-clamp-2">{c.description}</p>}
                             <div className="mt-2 flex items-center gap-2 flex-wrap">
                               <span className="text-xs text-app-dark/40">{c.instructeur}</span>
@@ -2961,7 +3190,10 @@ function DashboardPage({
 
                 {/* Course meta */}
                 <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
-                  <h2 className="text-xl font-bold text-app-dark">{selectedCours.titre}</h2>
+                  <div className="flex items-start gap-3 flex-wrap">
+                    <h2 className="text-xl font-bold text-app-dark flex-1">{selectedCours.titre}</h2>
+                    <CourseTagBadge titre={selectedCours.titre} />
+                  </div>
                   {selectedCours.description ? (
                     <p className="mt-2 text-sm text-app-dark/70 whitespace-pre-wrap">{selectedCours.description}</p>
                   ) : null}
@@ -2974,6 +3206,9 @@ function DashboardPage({
                   const isPdf = cached
                     ? cached.mimeType === "application/pdf" || cached.name.toLowerCase().endsWith(".pdf")
                     : f.mime_type === "application/pdf" || f.nom_fichier.toLowerCase().endsWith(".pdf");
+                  const isDocx = cached
+                    ? cached.name.toLowerCase().endsWith(".docx") || cached.name.toLowerCase().endsWith(".doc")
+                    : f.nom_fichier.toLowerCase().endsWith(".docx") || f.nom_fichier.toLowerCase().endsWith(".doc");
 
                   if (!cached) {
                     // Still loading
@@ -2991,14 +3226,26 @@ function DashboardPage({
                     );
                   }
 
-                  // Non-PDF: show label only, no download button
+                  if (isDocx) {
+                    return <InlineDocxViewer key={f.id_cours_fichier} base64={cached.base64} name={cached.name} />;
+                  }
+
+                  // Non-PDF: show label with download button
                   return (
                     <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
                       <span className="text-base">📎</span>
-                      <div>
-                        <p className="text-sm font-semibold text-app-dark">{f.nom_fichier}</p>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-app-dark">{cached.name}</p>
                         <p className="text-xs text-app-dark/40">Aperçu non disponible pour ce format</p>
                       </div>
+                      <button
+                        type="button"
+                        className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
+                        style={{ background: "#982598" }}
+                        onClick={() => triggerDownload(cached.base64, cached.name, cached.mimeType)}
+                      >
+                        ↓ Télécharger
+                      </button>
                     </div>
                   );
                 })}
@@ -3121,6 +3368,70 @@ function DashboardPage({
                       </div>
                     </article>
 
+                    {(stageaireData.soumissions_detail ?? []).length > 0 && (
+                      <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
+                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                          <div className="flex items-center gap-3">
+                            <svg className="h-4 w-4 text-white/70" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            <h3 className="font-bold text-white">Mes réponses</h3>
+                          </div>
+                          <p className="mt-0.5 text-xs text-white/50">Historique de vos soumissions et résultats.</p>
+                        </div>
+                        <div className="p-5 space-y-3">
+                          {(stageaireData.soumissions_detail ?? []).map((s) => (
+                            <div key={s.soumission_id} className="rounded-xl border border-app-muted/60 bg-app-soft/30 p-4 space-y-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm font-semibold text-app-dark leading-snug truncate">{s.controle_name}</p>
+                                  <p className="mt-0.5 text-xs text-app-dark/50">
+                                    Soumis le {new Date(s.submitted_at).toLocaleDateString("fr-FR")}
+                                    {s.has_fichier && (
+                                      <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700 font-semibold text-xs">
+                                        <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                                        fichier
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                  <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.statut === "SOUMIS" ? "bg-blue-100 text-blue-700" : s.statut === "RETARD" ? "bg-red-100 text-red-700" : "bg-app-soft text-app-dark/60"}`}>
+                                    {s.statut}
+                                  </span>
+                                  {s.note !== null && (
+                                    <span className="rounded-full px-3 py-0.5 text-sm font-black text-white" style={{ background: parseFloat(s.note) >= 10 ? "#22c55e" : "#ef4444" }}>
+                                      {s.note}/20
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              {s.correction_publiee ? (
+                                <div className="rounded-lg border border-app-muted/60 bg-white p-3">
+                                  <p className="text-xs font-semibold text-app-dark/60 mb-1">
+                                    {s.correction_titre ? `Correction — ${s.correction_titre}` : "Correction officielle"}
+                                  </p>
+                                  <p className="text-sm text-app-dark/80 whitespace-pre-wrap leading-relaxed">{s.correction_publiee}</p>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-app-dark/35 italic">Correction non encore publiée.</p>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDetailControleId(s.controle_id);
+                                  setDetailControlePdf(null);
+                                  const ctrl = stageaireData.controls_list.find((c) => c.id === s.controle_id);
+                                  if (ctrl?.has_fichier_enonce) void loadDetailControlePdf(s.controle_id);
+                                }}
+                                className="mt-1 rounded-lg border border-app-muted px-3 py-1.5 text-xs font-semibold text-app-dark/70 transition hover:bg-app-soft"
+                              >
+                                Voir le contrôle →
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </article>
+                    )}
+
                     {stageaireData.notes.length > 0 && (
                       <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                         <div className="px-6 py-4 border-b border-app-muted/60 flex items-center gap-3">
@@ -3196,7 +3507,27 @@ function DashboardPage({
                             </div>
                           )}
                           {detailControlePdf && !detailControlePdfLoading && (
-                            <InlinePdfViewer base64={detailControlePdf.base64} name={detailControlePdf.name} />
+                            detailControlePdf.mimeType === "application/pdf" || detailControlePdf.name.toLowerCase().endsWith(".pdf")
+                              ? <InlinePdfViewer base64={detailControlePdf.base64} name={detailControlePdf.name} />
+                              : detailControlePdf.name.toLowerCase().endsWith(".docx") || detailControlePdf.name.toLowerCase().endsWith(".doc")
+                                ? <InlineDocxViewer base64={detailControlePdf.base64} name={detailControlePdf.name} />
+                                : (
+                                  <div className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
+                                    <span className="text-base">📎</span>
+                                    <div className="flex-1">
+                                      <p className="text-sm font-semibold text-app-dark">{detailControlePdf.name}</p>
+                                      <p className="text-xs text-app-dark/40">Aperçu non disponible pour ce format</p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
+                                      style={{ background: "#982598" }}
+                                      onClick={() => triggerDownload(detailControlePdf.base64, detailControlePdf.name, detailControlePdf.mimeType)}
+                                    >
+                                      ↓ Télécharger
+                                    </button>
+                                  </div>
+                                )
                           )}
                           {!detailControlePdfLoading && !detailControlePdf && !ctrl?.enonce && (
                             <p className="text-sm italic text-app-dark/40 text-center py-4">Aucun énoncé disponible pour ce contrôle.</p>
@@ -3207,7 +3538,7 @@ function DashboardPage({
                       {/* Submit response section */}
                       <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                         <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
-                          <h3 className="font-bold text-white">Ma réponse</h3>
+                          <h3 className="font-bold text-white">Réponse Contrôle</h3>
                           <p className="mt-0.5 text-xs text-white/50">Soumettez votre réponse en PDF.</p>
                         </div>
                         <div className="p-5 space-y-4">
@@ -3338,8 +3669,8 @@ function DashboardPage({
               </article>
             ) : null}
 
-            {/* ── CLASSEMENT ── */}
-            {stageaireView === "classement" ? (
+            {/* ── CLASSEMENT (admin only) ── */}
+            {false ? (
               <div className="space-y-6">
                 {!classementData ? (
                   <div className="flex items-center justify-center py-16">
@@ -3481,244 +3812,6 @@ function DashboardPage({
         </section>
       ) : null}
 
-        {user.role === "Superviseur" && superviseurData ? (() => {
-          const getPerf = (m: number | null) =>
-            m === null ? "na" : m >= 14 ? "excellent" : m >= 10 ? "passable" : "insuffisant";
-          const perfColors: Record<string, string> = {
-            excellent: "bg-emerald-100 text-emerald-700",
-            passable: "bg-amber-100 text-amber-700",
-            insuffisant: "bg-red-100 text-red-700",
-            na: "bg-gray-100 text-gray-500",
-          };
-          const perfLabels: Record<string, string> = {
-            excellent: "Excellent",
-            passable: "Passable",
-            insuffisant: "Insuffisant",
-            na: "N/A",
-          };
-          const filteredClasses = superviseurData.classes.filter((c) => {
-            const matchSearch =
-              !superviseurSearch ||
-              c.classe_code.toLowerCase().includes(superviseurSearch.toLowerCase()) ||
-              c.brigade_code.toLowerCase().includes(superviseurSearch.toLowerCase());
-            const matchPerf =
-              superviseurPerfFilter === "all" || getPerf(c.note_moyenne) === superviseurPerfFilter;
-            return matchSearch && matchPerf;
-          });
-          const chartClasses = superviseurData.classes
-            .filter((c) => c.note_moyenne !== null)
-            .slice(0, 10);
-          const barH = 120;
-
-          return (
-            <section className="mt-6 grid gap-5">
-              {/* Quick Stats */}
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-                {(
-                  [
-                    { label: "Classes", value: superviseurData.monitoring.classes_count, bg: "bg-indigo-50", text: "text-indigo-700", icon: "🏫" },
-                    { label: "Brigades", value: superviseurData.monitoring.brigades_count, bg: "bg-purple-50", text: "text-purple-700", icon: "🏳" },
-                    { label: "Stagiaires", value: superviseurData.monitoring.stagiaires_count, bg: "bg-sky-50", text: "text-sky-700", icon: "👤" },
-                    { label: "Contrôles", value: superviseurData.monitoring.controles_count, bg: "bg-amber-50", text: "text-amber-700", icon: "📋" },
-                    { label: "Notes publiées", value: superviseurData.monitoring.published_notes_count, bg: "bg-emerald-50", text: "text-emerald-700", icon: "✅" },
-                  ] as const
-                ).map((stat) => (
-                  <article key={stat.label} className={`rounded-2xl border border-app-muted/40 p-4 shadow-sm ${stat.bg} ${stat.text}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl">{stat.icon}</span>
-                      {stat.label === "Notes publiées" && superviseurData.notifications.unread_count > 0 ? (
-                        <span className="rounded-full bg-red-500 px-2 py-0.5 text-[10px] font-bold text-white">
-                          {superviseurData.notifications.unread_count} non lues
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-3xl font-bold">{stat.value}</p>
-                    <p className="text-xs font-medium opacity-70">{stat.label}</p>
-                  </article>
-                ))}
-              </div>
-
-              {/* Data Visualization + Recent Activities */}
-              <div className="grid gap-5 lg:grid-cols-2">
-                {/* Bar Chart */}
-                <article className="card-hover rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                  <h3 className="text-base font-semibold text-app-dark">Moyennes par classe</h3>
-                  {chartClasses.length === 0 ? (
-                    <p className="mt-4 text-sm text-app-dark/50">Aucune donnée de moyenne disponible.</p>
-                  ) : (
-                    <div className="mt-4 overflow-x-auto">
-                      <svg
-                        width={Math.max(chartClasses.length * 46, 200)}
-                        height={barH + 54}
-                        aria-label="Graphique moyennes par classe"
-                      >
-                        {[0, 5, 10, 15, 20].map((v) => {
-                          const y = barH - (v / 20) * barH;
-                          return (
-                            <g key={v}>
-                              <line x1={0} y1={y} x2={chartClasses.length * 46} y2={y} stroke="#f0e0f0" strokeWidth={1} />
-                              <text x={2} y={y - 2} fontSize={8} fill="#bbb">{v}</text>
-                            </g>
-                          );
-                        })}
-                        {chartClasses.map((c, i) => {
-                          const val = c.note_moyenne ?? 0;
-                          const h = (val / 20) * barH;
-                          const x = i * 46 + 8;
-                          const y = barH - h;
-                          const color =
-                            getPerf(c.note_moyenne) === "excellent"
-                              ? "#10b981"
-                              : getPerf(c.note_moyenne) === "passable"
-                              ? "#f59e0b"
-                              : "#ef4444";
-                          return (
-                            <g key={`${c.classe_code}-${c.brigade_code}`}>
-                              <rect x={x} y={y} width={30} height={h} rx={4} fill={color} fillOpacity={0.8} />
-                              <text x={x + 15} y={y - 3} fontSize={8} textAnchor="middle" fill="#555">{val}</text>
-                              <text x={x + 15} y={barH + 14} fontSize={8} textAnchor="middle" fill="#777">{c.classe_code}</text>
-                              <text x={x + 15} y={barH + 26} fontSize={7} textAnchor="middle" fill="#aaa">{c.brigade_code}</text>
-                            </g>
-                          );
-                        })}
-                        <line x1={0} y1={barH} x2={chartClasses.length * 46} y2={barH} stroke="#ddd" strokeWidth={1} />
-                      </svg>
-                      <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500 inline-block" />Excellent (&ge;14)</span>
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-amber-400 inline-block" />Passable (10–13)</span>
-                        <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-red-400 inline-block" />Insuffisant (&lt;10)</span>
-                      </div>
-                    </div>
-                  )}
-                </article>
-
-                {/* Recent Activities */}
-                <article className="card-hover rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                  <h3 className="text-base font-semibold text-app-dark">Activités récentes</h3>
-                  {superviseurData.recent_activities.length === 0 ? (
-                    <p className="mt-4 text-sm text-app-dark/50">Aucune activité récente.</p>
-                  ) : (
-                    <ul className="mt-3 grid gap-2">
-                      {superviseurData.recent_activities.map((a, i) => (
-                        <li key={i} className="flex items-start gap-3 rounded-lg bg-app-soft/30 px-3 py-2">
-                          <span className="mt-0.5 text-base shrink-0">{a.type === "controle" ? "📋" : "📝"}</span>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-app-dark">{a.label}</p>
-                            {a.date ? (
-                              <p className="text-xs text-app-dark/50">
-                                {new Date(a.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}
-                              </p>
-                            ) : null}
-                          </div>
-                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            a.status === "PUBLIE" ? "bg-emerald-100 text-emerald-700" :
-                            a.status === "CLOTURE" ? "bg-gray-100 text-gray-600" :
-                            a.status === "CORRIGE" ? "bg-sky-100 text-sky-700" :
-                            "bg-amber-100 text-amber-700"
-                          }`}>{a.status}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </article>
-              </div>
-
-              {/* Classes Table with Search & Filter */}
-              <article className="card-hover rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-base font-semibold text-app-dark">Contrôles et notes par classe/brigade</h3>
-                  <div className="flex flex-wrap gap-2">
-                    <input
-                      type="text"
-                      placeholder="Rechercher classe ou brigade…"
-                      className="rounded-lg border border-app-muted px-3 py-1.5 text-sm outline-none focus:border-app-accent"
-                      value={superviseurSearch}
-                      onChange={(e) => setSuperviseurSearch(e.target.value)}
-                    />
-                    <select
-                      className="rounded-lg border border-app-muted px-3 py-1.5 text-sm outline-none focus:border-app-accent"
-                      value={superviseurPerfFilter}
-                      onChange={(e) => setSuperviseurPerfFilter(e.target.value)}
-                    >
-                      <option value="all">Toutes les performances</option>
-                      <option value="excellent">Excellent (≥14)</option>
-                      <option value="passable">Passable (10–13)</option>
-                      <option value="insuffisant">Insuffisant (&lt;10)</option>
-                      <option value="na">Sans note</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="mt-4 overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-app-muted text-left text-xs font-semibold uppercase tracking-wide text-app-dark/50">
-                        <th className="pb-2 pr-4">Classe</th>
-                        <th className="pb-2 pr-4">Brigade</th>
-                        <th className="pb-2 pr-4">Stagiaires</th>
-                        <th className="pb-2 pr-4">Contrôles</th>
-                        <th className="pb-2 pr-4">Notes publiées</th>
-                        <th className="pb-2 pr-4">Moyenne</th>
-                        <th className="pb-2">Statut</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredClasses.map((c) => {
-                        const perf = getPerf(c.note_moyenne);
-                        return (
-                          <tr
-                            className="border-b border-app-muted/30 transition hover:bg-app-soft/20"
-                            key={`${c.classe_code}-${c.brigade_code}`}
-                          >
-                            <td className="py-2.5 pr-4 font-medium">{c.classe_code}</td>
-                            <td className="py-2.5 pr-4">{c.brigade_code}</td>
-                            <td className="py-2.5 pr-4">{c.stagiaires_count}</td>
-                            <td className="py-2.5 pr-4">{c.controles_count}</td>
-                            <td className="py-2.5 pr-4">{c.notes_published_count}</td>
-                            <td className="py-2.5 pr-4 font-semibold">{c.note_moyenne ?? "–"}</td>
-                            <td className="py-2.5">
-                              <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${perfColors[perf]}`}>
-                                {perfLabels[perf]}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {filteredClasses.length === 0 ? (
-                        <tr>
-                          <td className="py-4 text-center text-sm text-app-dark/50" colSpan={7}>
-                            Aucune classe ne correspond aux critères.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-                {filteredClasses.length > 0 ? (
-                  <p className="mt-2 text-xs text-app-dark/40">{filteredClasses.length} classe(s) affichée(s)</p>
-                ) : null}
-              </article>
-
-              <ReferenceManagementSection
-                referencesData={referencesData}
-                referenceTab={referenceTab}
-                setReferenceTab={setReferenceTab}
-                newCorps={newCorps}
-                setNewCorps={setNewCorps}
-                newRank={newRank}
-                setNewRank={setNewRank}
-                newSpeciality={newSpeciality}
-                setNewSpeciality={setNewSpeciality}
-                handleCreateCorps={handleCreateCorps}
-                handleCreateRank={handleCreateRank}
-                handleCreateSpeciality={handleCreateSpeciality}
-                handleRenameCorps={handleRenameCorps}
-                handleRenameRank={handleRenameRank}
-                handleRenameSpeciality={handleRenameSpeciality}
-              />
-            </section>
-          );
-        })() : null}
-
       {user.role === "Coordinateur" && coordinateurData ? (
         <section className="mt-6 grid gap-5 md:grid-cols-[220px_1fr]">
           {/* Sidebar */}
@@ -3741,15 +3834,70 @@ function DashboardPage({
                 </button>
               ))}
             </div>
+
+            {/* Notification badge in sidebar */}
             {coordinateurData.notifications.unread_count > 0 && (
-              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-                <p className="text-xs font-semibold text-amber-700">{coordinateurData.notifications.unread_count} notification{coordinateurData.notifications.unread_count > 1 ? "s" : ""} non lue{coordinateurData.notifications.unread_count > 1 ? "s" : ""}</p>
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2">
+                <svg className="h-3.5 w-3.5 shrink-0 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9m-4.27 13a2 2 0 01-3.46 0" /></svg>
+                <p className="text-xs font-semibold text-amber-700">{coordinateurData.notifications.unread_count} non lue{coordinateurData.notifications.unread_count > 1 ? "s" : ""}</p>
               </div>
             )}
+
+            {/* Quick actions */}
+            <div className="mt-5 border-t border-app-muted/60 pt-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-app-dark/40">Actions rapides</p>
+              <div className="grid gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setCoordinateurView("reporting")}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-app-dark hover:bg-app-soft transition text-left"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  Voir les performances
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportCSV()}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-app-dark hover:bg-app-soft transition text-left"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                  Exporter CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportXLSX()}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-app-dark hover:bg-app-soft transition text-left"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                  Exporter Excel
+                </button>
+              </div>
+            </div>
           </aside>
 
           {/* Main content */}
           <div className="min-w-0 grid gap-5">
+
+            {/* ── NOTIFICATION FLASH ── */}
+            {coordinateurData.notifications.unread_count > 0 && !coordNotifDismissed && (
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm animate-pulse-once">
+                <svg className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">
+                    {coordinateurData.notifications.unread_count} notification{coordinateurData.notifications.unread_count > 1 ? "s" : ""} non lue{coordinateurData.notifications.unread_count > 1 ? "s" : ""}
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-700/70">Consultez vos notifications pour rester informé des activités récentes.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCoordNotifDismissed(true)}
+                  className="shrink-0 rounded-lg p-1 text-amber-500 transition hover:bg-amber-100"
+                  title="Fermer"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+            )}
 
             {/* ── DASHBOARD ── */}
             {coordinateurView === "dashboard" && (
@@ -3757,60 +3905,165 @@ function DashboardPage({
                 {/* KPI cards */}
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                   {[
-                    { label: "Brigades", value: coordinateurData.monitoring.brigades.length, color: "#15173D", bg: "rgba(21,23,61,0.07)" },
-                    { label: "Stagiaires", value: coordinateurData.monitoring.stagiaires_total, color: "#15173D", bg: "rgba(21,23,61,0.07)" },
-                    { label: "Contrôles publiés", value: coordinateurData.monitoring.controls_published, color: "#982598", bg: "rgba(152,37,152,0.07)" },
-                    { label: "Notes publiées", value: coordinateurData.monitoring.notes_published, color: "#059669", bg: "rgba(5,150,105,0.07)" },
+                    { label: "Brigades", value: coordinateurData.monitoring.brigades.length, color: "#15173D", bg: "rgba(21,23,61,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /> },
+                    { label: "Stagiaires", value: coordinateurData.monitoring.stagiaires_total, color: "#15173D", bg: "rgba(21,23,61,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /> },
+                    { label: "Contrôles publiés", value: coordinateurData.monitoring.controls_published, color: "#982598", bg: "rgba(152,37,152,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /> },
+                    { label: "Notes publiées", value: coordinateurData.monitoring.notes_published, color: "#059669", bg: "rgba(5,150,105,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /> },
                   ].map((s) => (
                     <article key={s.label} className="rounded-2xl border border-app-muted bg-white p-4 shadow-sm">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-xl mb-2" style={{ background: s.bg }}>
-                        <span className="text-lg font-black" style={{ color: s.color }}>{s.value}</span>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: s.bg }}>
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" style={{ color: s.color }}>{s.icon}</svg>
+                        </div>
                       </div>
-                      <p className="text-xs font-semibold text-app-dark/50 uppercase tracking-wide">{s.label}</p>
+                      <p className="text-2xl font-black" style={{ color: s.color }}>{s.value}</p>
+                      <p className="mt-0.5 text-xs font-semibold text-app-dark/50 uppercase tracking-wide">{s.label}</p>
                     </article>
                   ))}
                 </div>
 
-                {/* Brigade table */}
+                {/* Performance mini-chart strip */}
+                <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
+                  <div className="px-6 py-4 border-b border-app-muted/60 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-bold text-app-dark">Performance globale</h3>
+                      <p className="mt-0.5 text-xs text-app-dark/50">Indicateurs clés en temps réel</p>
+                    </div>
+                    <button type="button" onClick={() => setCoordinateurView("reporting")} className="text-xs font-semibold text-app-accent hover:underline">Voir le détail →</button>
+                  </div>
+                  <div className="grid grid-cols-3 divide-x divide-app-muted/40 p-0">
+                    {[
+                      {
+                        label: "Taux de réussite",
+                        value: coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "—",
+                        pct: coordinateurData.monitoring.taux_reussite_global ?? 0,
+                        color: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b",
+                        sub: "stagiaires ≥ 10/20",
+                      },
+                      {
+                        label: "Note moyenne",
+                        value: coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}/20` : "—",
+                        pct: ((coordinateurData.monitoring.avancement_moyen ?? 0) / 20) * 100,
+                        color: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444",
+                        sub: "moyenne générale",
+                      },
+                      {
+                        label: "Évalués",
+                        value: `${coordinateurData.monitoring.brigades.reduce((s, b) => s + b.avec_notes_count, 0)}/${coordinateurData.monitoring.stagiaires_total}`,
+                        pct: coordinateurData.monitoring.stagiaires_total > 0 ? (coordinateurData.monitoring.brigades.reduce((s, b) => s + b.avec_notes_count, 0) / coordinateurData.monitoring.stagiaires_total) * 100 : 0,
+                        color: "#982598",
+                        sub: "stagiaires notés",
+                      },
+                    ].map((kpi) => (
+                      <div key={kpi.label} className="flex flex-col gap-2 p-5">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">{kpi.label}</p>
+                        <p className="text-2xl font-black" style={{ color: kpi.color }}>{kpi.value}</p>
+                        <div className="h-1.5 w-full rounded-full bg-app-muted/30 overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.min(kpi.pct, 100)}%`, background: kpi.color }} />
+                        </div>
+                        <p className="text-xs text-app-dark/35">{kpi.sub}</p>
+                      </div>
+                    ))}
+                  </div>
+                </article>
+
+                {/* Brigade table with search + filters */}
                 <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
                     <h3 className="font-bold text-white">Vue par brigade</h3>
                     <p className="mt-0.5 text-xs text-white/50">Détail par brigade sous votre responsabilité.</p>
                   </div>
+
+                  {/* Search + filter bar */}
+                  <div className="flex flex-wrap items-center gap-3 border-b border-app-muted/40 bg-app-soft/30 px-5 py-3">
+                    {/* Search */}
+                    <div className="relative flex-1 min-w-[160px]">
+                      <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                      <input
+                        type="text"
+                        placeholder="Rechercher une brigade…"
+                        value={brigadeSearch}
+                        onChange={(e) => setBrigadeSearch(e.target.value)}
+                        className="w-full rounded-lg border border-app-muted bg-white py-1.5 pl-8 pr-3 text-sm text-app-dark placeholder-app-dark/30 focus:outline-none focus:ring-1 focus:ring-app-accent"
+                      />
+                    </div>
+                    {/* Dynamic filters */}
+                    <div className="flex gap-1.5 flex-wrap">
+                      {([
+                        { key: "tous", label: "Toutes" },
+                        { key: "reussite", label: "En réussite ≥70%" },
+                        { key: "surveiller", label: "À surveiller <50%" },
+                        { key: "sans_notes", label: "Sans notes" },
+                      ] as const).map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setBrigadeFilter(f.key)}
+                          className="rounded-full px-3 py-1 text-xs font-semibold transition"
+                          style={{
+                            background: brigadeFilter === f.key ? "#15173D" : "rgba(21,23,61,0.06)",
+                            color: brigadeFilter === f.key ? "white" : "#15173D",
+                          }}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-app-muted/60 bg-app-soft/40">
-                          {["Brigade", "Classes", "Stagiaires", "Notes publiées", "Moyenne /20", "Taux réussite", "Soumissions"].map((h) => (
-                            <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-app-dark/50">{h}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {coordinateurData.monitoring.brigades.map((b) => (
-                          <tr className="border-b border-app-muted/40 hover:bg-app-soft/30 transition" key={b.brigade_code}>
-                            <td className="px-4 py-3 font-semibold text-app-dark">{b.brigade_code}</td>
-                            <td className="px-4 py-3 text-app-dark/70">{b.classes_count}</td>
-                            <td className="px-4 py-3 text-app-dark/70">{b.stagiaires_count}</td>
-                            <td className="px-4 py-3 text-app-dark/70">{b.published_notes_count}</td>
-                            <td className="px-4 py-3">
-                              {b.note_moyenne !== null ? (
-                                <span className="font-bold" style={{ color: b.note_moyenne >= 10 ? "#059669" : "#ef4444" }}>{b.note_moyenne}/20</span>
-                              ) : <span className="text-app-dark/30">—</span>}
-                            </td>
-                            <td className="px-4 py-3">
-                              {b.taux_reussite !== null ? (
-                                <span className="font-bold" style={{ color: b.taux_reussite >= 50 ? "#059669" : "#f59e0b" }}>{b.taux_reussite}%</span>
-                              ) : <span className="text-app-dark/30">—</span>}
-                            </td>
-                            <td className="px-4 py-3 text-app-dark/70">{b.soumissions_count}</td>
-                          </tr>
-                        ))}
-                        {coordinateurData.monitoring.brigades.length === 0 && (
-                          <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-app-dark/40 italic">Aucune brigade à afficher.</td></tr>
-                        )}
-                      </tbody>
-                    </table>
+                    {(() => {
+                      const filtered = coordinateurData.monitoring.brigades.filter((b) => {
+                        const matchSearch = b.brigade_code.toLowerCase().includes(brigadeSearch.toLowerCase());
+                        const matchFilter =
+                          brigadeFilter === "tous" ? true :
+                          brigadeFilter === "reussite" ? (b.taux_reussite !== null && b.taux_reussite >= 70) :
+                          brigadeFilter === "surveiller" ? (b.taux_reussite === null || b.taux_reussite < 50) :
+                          brigadeFilter === "sans_notes" ? b.published_notes_count === 0 :
+                          true;
+                        return matchSearch && matchFilter;
+                      });
+                      return (
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-app-muted/60 bg-app-soft/40">
+                              {["Brigade", "Classes", "Stagiaires", "Notes publiées", "Moyenne /20", "Taux réussite", "Soumissions"].map((h) => (
+                                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-app-dark/50">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.map((b) => (
+                              <tr className="border-b border-app-muted/40 hover:bg-app-soft/30 transition" key={b.brigade_code}>
+                                <td className="px-4 py-3 font-semibold text-app-dark">{b.brigade_code}</td>
+                                <td className="px-4 py-3 text-app-dark/70">{b.classes_count}</td>
+                                <td className="px-4 py-3 text-app-dark/70">{b.stagiaires_count}</td>
+                                <td className="px-4 py-3 text-app-dark/70">{b.published_notes_count}</td>
+                                <td className="px-4 py-3">
+                                  {b.note_moyenne !== null ? (
+                                    <span className="font-bold" style={{ color: b.note_moyenne >= 10 ? "#059669" : "#ef4444" }}>{b.note_moyenne}/20</span>
+                                  ) : <span className="text-app-dark/30">—</span>}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {b.taux_reussite !== null ? (
+                                    <div className="flex items-center gap-2">
+                                      <div className="h-1.5 w-16 rounded-full bg-app-muted/30 overflow-hidden">
+                                        <div className="h-full rounded-full" style={{ width: `${b.taux_reussite}%`, background: b.taux_reussite >= 70 ? "#059669" : b.taux_reussite >= 50 ? "#f59e0b" : "#ef4444" }} />
+                                      </div>
+                                      <span className="font-bold text-xs" style={{ color: b.taux_reussite >= 70 ? "#059669" : b.taux_reussite >= 50 ? "#f59e0b" : "#ef4444" }}>{b.taux_reussite}%</span>
+                                    </div>
+                                  ) : <span className="text-app-dark/30">—</span>}
+                                </td>
+                                <td className="px-4 py-3 text-app-dark/70">{b.soumissions_count}</td>
+                              </tr>
+                            ))}
+                            {filtered.length === 0 && (
+                              <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-app-dark/40 italic">Aucune brigade ne correspond aux critères.</td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      );
+                    })()}
                   </div>
                 </article>
               </>
@@ -3977,7 +4230,7 @@ function DashboardPage({
               {/* Users — collapsible */}
               <div>
                 <button
-                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${adminView === "users" ? "bg-app-dark text-white" : "text-app-dark hover:bg-app-soft"}`}
+                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${adminView === "users" ? "bg-app-dark text-white" : "border border-app-dark text-app-dark hover:bg-app-soft"}`}
                   onClick={() => {
                     setAdminUsersExpanded((v) => !v);
                     setAdminView("users");
@@ -3999,7 +4252,7 @@ function DashboardPage({
 
                 {adminUsersExpanded && (
                   <div className="ml-3 mt-1 grid gap-0.5 border-l-2 border-app-muted pl-3">
-                    {(["Stagiaire", "Instructeur", "Superviseur", "Coordinateur", "Admin"] as const).map((role) => {
+                    {(["Stagiaire", "Instructeur", "Coordinateur", "Admin"] as const).map((role) => {
                       const count = adminData.users.filter((u) => u.role === role).length;
                       const isActive = adminView === "users" && adminUserRoleFilter === role;
                       return (
@@ -4028,8 +4281,8 @@ function DashboardPage({
               <AdminNavButton active={adminView === "accounts"} onClick={() => { setAdminView("accounts"); setSelectedAdminUser(null); }}>
                 {t("admin.navAccounts")}
               </AdminNavButton>
-              <AdminNavButton active={adminView === "subjects"} onClick={() => { setAdminView("subjects"); setSelectedAdminUser(null); }}>
-                {t("admin.navSubjects")}
+              <AdminNavButton active={adminView === "bulk_csv"} onClick={() => { setAdminView("bulk_csv"); setSelectedAdminUser(null); }}>
+                Sujets fin stage
               </AdminNavButton>
               <AdminNavButton active={adminView === "classes"} onClick={() => { setAdminView("classes"); setSelectedAdminUser(null); }}>
                 {t("admin.navClasses")}
@@ -4043,6 +4296,9 @@ function DashboardPage({
               <AdminNavButton active={adminView === "classement"} onClick={() => { setAdminView("classement"); setSelectedAdminUser(null); }}>
                 Classement
               </AdminNavButton>
+              <AdminNavButton active={adminView === "fichiers_renseignement"} onClick={() => { setAdminView("fichiers_renseignement"); setSelectedAdminUser(null); }}>
+                Fichiers de renseignement
+              </AdminNavButton>
             </div>
           </aside>
 
@@ -4050,35 +4306,15 @@ function DashboardPage({
             {adminView === "overview" ? (
               <div className="grid gap-5">
                 <PanelSection title="Gestion de la plateforme">
-                  <MetricGrid>
-                    <MetricCard label="Utilisateurs" value={adminData.platform.users_total} />
-                    <MetricCard label="Utilisateurs actifs" value={adminData.platform.users_active} />
-                    <MetricCard label="Cours" value={adminData.platform.cours_total} />
-                    <MetricCard label="Controles" value={adminData.platform.controles_total} />
-                    <MetricCard label="Soumissions" value={adminData.platform.soumissions_total} />
-                  </MetricGrid>
+                  <AdminPlatformChart platform={adminData.platform} />
                 </PanelSection>
 
                 {/* ── Statistiques rapides par rôle ── */}
-                <PanelSection title="Statistiques rapides">
-                  <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-                    {(["Stagiaire", "Instructeur", "Superviseur", "Coordinateur", "Admin"] as const).map((role) => {
-                      const total = adminData.users.filter((u) => u.role === role).length;
-                      const active = adminData.users.filter((u) => u.role === role && u.is_active).length;
-                      return (
-                        <button
-                          key={role}
-                          type="button"
-                          onClick={() => { setAdminView("users"); setSelectedAdminUser(null); setAdminUserRoleFilter(role); setAdminUsersExpanded(true); setAdminUsersPage(1); }}
-                          className="rounded-xl border border-app-muted bg-app-soft p-4 text-left transition hover:border-app-dark hover:shadow-sm"
-                        >
-                          <p className="text-3xl font-black text-app-dark">{total}</p>
-                          <p className="mt-1 text-xs font-semibold text-app-dark/60">{role}s</p>
-                          <p className="mt-0.5 text-[10px] text-app-dark/40">{active} actif{active !== 1 ? "s" : ""}</p>
-                        </button>
-                      );
-                    })}
-                  </div>
+                <PanelSection title="Statistiques rapides par rôle">
+                  <AdminRoleChart
+                    users={adminData.users}
+                    onRoleClick={(role) => { setAdminView("users"); setSelectedAdminUser(null); setAdminUserRoleFilter(role); setAdminUsersExpanded(true); setAdminUsersPage(1); }}
+                  />
                 </PanelSection>
               </div>
             ) : null}
@@ -4236,7 +4472,7 @@ function DashboardPage({
                   const pageUsers = allFiltered.slice(pageStart, pageEnd);
 
                   // Group page users by role
-                  const roleOrder = ["Stagiaire", "Instructeur", "Superviseur", "Coordinateur", "Admin"];
+                  const roleOrder = ["Stagiaire", "Instructeur", "Coordinateur", "Admin"];
                   const groups: Record<string, typeof pageUsers> = {};
                   for (const rg of roleOrder) groups[rg] = pageUsers.filter((u) => u.role === rg);
 
@@ -4443,13 +4679,14 @@ function DashboardPage({
               </PanelSection>
             ) : null}
 
-            {adminView === "accounts" ? (
+            {(adminView === "accounts" || adminView === "bulk_csv") ? (
               <div className="grid gap-6">
                 <PanelSection
-                  title="Gestion des comptes"
-                  subtitle="Creer des comptes pour tous les roles ou importer en masse par CSV."
+                  title={adminView === "bulk_csv" ? "Import CSV (bulk)" : "Gestion des comptes"}
+                  subtitle={adminView === "bulk_csv" ? "Importez plusieurs comptes en une seule operation via un fichier CSV." : "Creer des comptes pour tous les roles ou importer en masse par CSV."}
                 />
 
+                {adminView !== "bulk_csv" && <>
                 <SubCard title="Creation unitaire">
                   <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={handleCreateAccount}>
                     <Input
@@ -4507,7 +4744,7 @@ function DashboardPage({
                           }))
                         }
                       >
-                        {["Instructeur", "Stagiaire", "Superviseur", "Coordinateur", "Admin"].map((roleName) => (
+                        {["Instructeur", "Stagiaire", "Coordinateur", "Admin"].map((roleName) => (
                           <option key={roleName} value={roleName}>
                             {roleName}
                           </option>
@@ -4628,13 +4865,14 @@ function DashboardPage({
                     </div>
                   </div>
                 )}
+                </>}
 
                 <SubCard title="Import CSV (bulk)">
                   <p className="mt-1 text-xs text-app-dark/70">
                     Headers attendus: username,email,password,role,matricule,est_civil,corps_id,rank_id,speciality_id
                   </p>
                   <p className="mt-1 text-xs text-app-dark/50">
-                    Roles valides: Instructeur, Stagiaire, Superviseur, Coordinateur, Admin. Pour Instructeur civil: est_civil=true, laisser corps/rank/speciality vides.
+                    Roles valides: Instructeur, Stagiaire, Coordinateur, Admin. Pour Instructeur civil: est_civil=true, laisser corps/rank/speciality vides.
                   </p>
                   {referencesData.corps.length > 0 && (
                     <details className="mt-3 text-xs">
@@ -4894,6 +5132,9 @@ function DashboardPage({
                 handleRenameCorps={handleRenameCorps}
                 handleRenameRank={handleRenameRank}
                 handleRenameSpeciality={handleRenameSpeciality}
+                handleDeleteCorps={handleDeleteCorps}
+                handleDeleteRank={handleDeleteRank}
+                handleDeleteSpeciality={handleDeleteSpeciality}
               />
             ) : null}
 
@@ -4983,6 +5224,174 @@ function DashboardPage({
                 ))}
               </div>
             ) : null}
+
+            {adminView === "fichiers_renseignement" ? (
+              <div className="grid gap-6">
+                <PanelSection title="Fichiers de renseignement" subtitle="Liste des fichiers de renseignement soumis par les stagiaires.">
+                  <button
+                    className="mt-3 rounded bg-app-dark px-3 py-1.5 text-xs text-white"
+                    onClick={() => void loadAdminFichiersRenseignement()}
+                    type="button"
+                  >
+                    Rafraichir
+                  </button>
+                </PanelSection>
+
+                {/* Template document management */}
+                <SubCard title="Document modele">
+                  <p className="mb-3 text-xs text-app-dark/60">Definissez le document modele que les stagiaires devront telecharger, remplir et remettre.</p>
+                  {adminFichierTemplate?.has_template && (
+                    <div className="mb-3 flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/60 px-3 py-2">
+                      <svg className="h-4 w-4 shrink-0 text-app-dark/50" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      <span className="flex-1 truncate text-xs font-medium text-app-dark">{adminFichierTemplate.nom_fichier}</span>
+                      <button
+                        className="rounded bg-app-dark px-2 py-1 text-xs text-white hover:bg-app-accent"
+                        onClick={() => void handleAdminDownloadFichierTemplate()}
+                        type="button"
+                      >
+                        Telecharger
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-app-muted bg-white px-3 py-1.5 text-xs font-medium text-app-dark hover:border-app-dark/30 transition">
+                      <svg className="h-3.5 w-3.5 text-app-dark/50" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                      {adminFichierTemplateFile ? adminFichierTemplateFile.name : "Choisir un fichier"}
+                      <input type="file" className="hidden" onChange={(e) => setAdminFichierTemplateFile(e.target.files?.[0] ?? null)} />
+                    </label>
+                    <button
+                      className="rounded bg-app-dark px-3 py-1.5 text-xs text-white hover:bg-app-accent disabled:opacity-40 transition"
+                      disabled={!adminFichierTemplateFile}
+                      onClick={() => void handleAdminUploadFichierTemplate()}
+                      type="button"
+                    >
+                      {adminFichierTemplate?.has_template ? "Mettre a jour le modele" : "Definir le modele"}
+                    </button>
+                  </div>
+                </SubCard>
+
+                <SubCard title="Fichiers soumis">
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-app-muted text-left">
+                          <th className="py-2 px-3">Stagiaire</th>
+                          <th className="py-2 px-3">Sujet</th>
+                          <th className="py-2 px-3">Nom du fichier</th>
+                          <th className="py-2 px-3">Etat</th>
+                          <th className="py-2 px-3">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adminFichiersRenseignement === null ? (
+                          <tr><td className="py-3 text-sm text-app-dark/60" colSpan={5}>Chargement...</td></tr>
+                        ) : adminFichiersRenseignement.length === 0 ? (
+                          <tr><td className="py-3 text-sm text-app-dark/60" colSpan={5}>Aucun stagiaire avec sujet de fin de stage.</td></tr>
+                        ) : (
+                          adminFichiersRenseignement.map((item) => (
+                            <tr className="border-b border-app-muted/40" key={item.stagiaire_id}>
+                              <td className="py-2 px-3 font-medium">{item.stagiaire_username}</td>
+                              <td className="py-2 px-3">{item.sujet_titre}</td>
+                              <td className="py-2 px-3">{item.has_fichier ? item.nom_fichier : <span className="italic text-app-dark/40">Non soumis</span>}</td>
+                              <td className="py-2 px-3">
+                                {item.has_fichier ? (
+                                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">Soumis</span>
+                                ) : (
+                                  <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-600">Non soumis</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3">
+                                {item.has_fichier ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      className="rounded bg-app-dark px-2 py-1 text-xs text-white hover:bg-app-accent"
+                                      onClick={() => void handleAdminPreviewFichierRenseignement(item.stagiaire_id)}
+                                      type="button"
+                                    >
+                                      Voir
+                                    </button>
+                                    <button
+                                      className="rounded border border-app-muted bg-white px-2 py-1 text-xs text-app-dark hover:bg-app-soft"
+                                      onClick={() => void handleAdminDownloadFichierRenseignement(item.stagiaire_id, item.nom_fichier)}
+                                      type="button"
+                                    >
+                                      Telecharger
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-app-dark/40">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </SubCard>
+              </div>
+            ) : null}
+
+            {/* ── Preview modal ── */}
+            {adminPreviewFichier && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+                onClick={() => setAdminPreviewFichier(null)}
+              >
+                <div
+                  className="relative flex w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl overflow-hidden"
+                  style={{ maxHeight: "90vh" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Header */}
+                  <div className="flex items-center justify-between border-b border-app-muted px-5 py-3">
+                    <p className="truncate text-sm font-semibold text-app-dark">{adminPreviewFichier.nom_fichier}</p>
+                    <div className="flex items-center gap-2 ml-4 shrink-0">
+                      <button
+                        className="rounded border border-app-muted bg-app-soft px-3 py-1 text-xs font-medium text-app-dark hover:bg-white transition"
+                        onClick={() => triggerDownload(adminPreviewFichier.base64, adminPreviewFichier.nom_fichier, adminPreviewFichier.mime_type)}
+                        type="button"
+                      >
+                        Telecharger
+                      </button>
+                      <button
+                        className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-app-soft transition text-app-dark/60"
+                        onClick={() => setAdminPreviewFichier(null)}
+                        type="button"
+                      >
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                  {/* Content */}
+                  <div className="flex-1 overflow-auto p-4">
+                    {adminPreviewFichier.mime_type === "application/pdf" || adminPreviewFichier.nom_fichier.toLowerCase().endsWith(".pdf") ? (
+                      <InlinePdfViewer base64={adminPreviewFichier.base64} name={adminPreviewFichier.nom_fichier} />
+                    ) : adminPreviewFichier.mime_type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || adminPreviewFichier.nom_fichier.toLowerCase().endsWith(".docx") ? (
+                      <InlineDocxViewer base64={adminPreviewFichier.base64} name={adminPreviewFichier.nom_fichier} />
+                    ) : adminPreviewFichier.mime_type.startsWith("image/") ? (
+                      <img
+                        alt={adminPreviewFichier.nom_fichier}
+                        className="mx-auto max-w-full rounded-lg"
+                        src={`data:${adminPreviewFichier.mime_type};base64,${adminPreviewFichier.base64}`}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center gap-4 py-12 text-center">
+                        <svg className="h-12 w-12 text-app-dark/20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        <p className="text-sm text-app-dark/50">Apercu non disponible pour ce type de fichier.</p>
+                        <button
+                          className="rounded bg-app-dark px-4 py-2 text-sm text-white hover:bg-app-accent"
+                          onClick={() => triggerDownload(adminPreviewFichier.base64, adminPreviewFichier.nom_fichier, adminPreviewFichier.mime_type)}
+                          type="button"
+                        >
+                          Telecharger pour consulter
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {adminView === "events" ? (
               <div className="grid gap-6">
@@ -5394,13 +5803,31 @@ function DashboardPage({
       {renameModal.open ? (
         <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/25 p-4">
           <div className="modal-panel w-full max-w-md rounded-xl border border-app-muted bg-white p-4 shadow-2xl">
-            <h3 className="text-lg font-semibold">Renommer reference</h3>
+            <h3 className="text-lg font-semibold">
+              {renameModal.target === "corps" ? "Modifier le corps" : renameModal.target === "rank" ? "Modifier le grade" : "Modifier la spécialité"}
+            </h3>
             <form className="mt-3 grid gap-3" onSubmit={handleSubmitRename}>
-              <Input label="Nouveau libelle" value={renameModal.value} onChange={(value) => setRenameModal((prev) => ({ ...prev, value }))} />
+              <Input label="Code" value={renameModal.code} onChange={(code) => setRenameModal((prev) => ({ ...prev, code }))} />
+              <Input label="Libellé" value={renameModal.value} onChange={(value) => setRenameModal((prev) => ({ ...prev, value }))} />
+              {(renameModal.target === "rank" || renameModal.target === "speciality") && referencesData ? (
+                <label className="grid gap-1 text-sm font-medium text-app-dark">
+                  Corps{renameModal.target === "speciality" ? " (optionnel)" : ""}
+                  <select
+                    className="rounded border border-app-muted bg-white px-3 py-2"
+                    value={renameModal.corps_id}
+                    onChange={(e) => setRenameModal((prev) => ({ ...prev, corps_id: e.target.value }))}
+                  >
+                    {renameModal.target === "speciality" && <option value="">— aucun —</option>}
+                    {referencesData.corps.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               <div className="flex justify-end gap-2">
                 <button
                   className="rounded border border-app-muted px-3 py-2 text-sm"
-                  onClick={() => setRenameModal({ open: false, target: null, id: "", value: "" })}
+                  onClick={() => setRenameModal({ open: false, target: null, id: "", value: "", code: "", corps_id: "" })}
                   type="button"
                 >
                   Annuler
@@ -5413,85 +5840,6 @@ function DashboardPage({
           </div>
         </div>
       ) : null}
-    </main>
-  );
-}
-
-function SettingsPage({ user, onLogout }: { user: MeResponse | null; onLogout: () => void }) {
-  const { t, i18n } = useTranslation();
-  const [settingsView, setSettingsView] = useState<"language" | "session">("language");
-  if (!user) return <Navigate to="/login" replace />;
-  const currentLanguage = i18n.language.startsWith("fr") ? "fr" : "en";
-
-  const changeLanguage = async (language: "fr" | "en") => {
-    localStorage.setItem("app_language", language);
-    await i18n.changeLanguage(language);
-  };
-
-  return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-10">
-      <section className="grid gap-4 card-hover rounded-2xl border border-app-muted bg-white p-4 shadow-sm md:grid-cols-[230px_minmax(0,1fr)]">
-            <aside className="sidebar-animated rounded-xl border border-app-muted bg-app-soft/40 p-3">
-              <h1 className="mb-2 px-2 text-sm font-semibold uppercase tracking-[0.12em] text-app-dark">{t("settings.title")}</h1>
-              <div className="grid gap-2">
-                <AdminNavButton active={settingsView === "language"} onClick={() => setSettingsView("language")}>
-                  {t("settings.languageTitle")}
-                </AdminNavButton>
-                <AdminNavButton active={settingsView === "session"} onClick={() => setSettingsView("session")}>
-                  {t("settings.accountTitle")}
-                </AdminNavButton>
-              </div>
-            </aside>
-
-            <article className="rounded-xl border border-app-muted bg-white p-6">
-              <h1 className="text-2xl font-semibold tracking-tight text-app-dark">{t("settings.title")}</h1>
-              <p className="mt-1 text-sm text-app-dark/70">{t("settings.subtitle")}</p>
-
-              {settingsView === "language" ? (
-                <article className="mt-6 rounded-xl border border-app-muted bg-app-soft p-4">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-app-accent">{t("settings.languageTitle")}</h2>
-                  <p className="mt-2 text-sm text-app-dark/80">{t("settings.languageHint")}</p>
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      className={`rounded-md px-3 py-2 text-sm font-semibold ${
-                        currentLanguage === "fr" ? "bg-app-dark text-white" : "bg-white text-app-dark"
-                      }`}
-                      onClick={() => void changeLanguage("fr")}
-                      type="button"
-                    >
-                      {t("settings.french")}
-                    </button>
-                    <button
-                      className={`rounded-md px-3 py-2 text-sm font-semibold ${
-                        currentLanguage === "en" ? "bg-app-dark text-white" : "bg-white text-app-dark"
-                      }`}
-                      onClick={() => void changeLanguage("en")}
-                      type="button"
-                    >
-                      {t("settings.english")}
-                    </button>
-                  </div>
-                </article>
-              ) : null}
-
-              {settingsView === "session" ? (
-                <article className="mt-6 rounded-xl border border-app-muted bg-app-soft p-4">
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-app-accent">{t("settings.accountTitle")}</h2>
-                  <p className="mt-2 text-sm text-app-dark/80">
-                    {t("settings.accountConnected")} <span className="font-semibold">{user.username}</span> ({t(`roles.${user.role}`)})
-                  </p>
-                  <button
-                    className="mt-4 inline-flex items-center gap-2 rounded-md bg-app-dark px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
-                    onClick={onLogout}
-                    type="button"
-                  >
-                    <span aria-hidden="true">↩</span>
-                    {t("nav.logout")}
-                  </button>
-                </article>
-              ) : null}
-            </article>
-      </section>
     </main>
   );
 }
@@ -5711,10 +6059,6 @@ function AppShell() {
       document.title = `${t("titles.signup")} - ${t("titles.appName")}`;
       return;
     }
-    if (location.pathname === "/settings") {
-      document.title = `${t("titles.settings")} - ${t("titles.appName")}`;
-      return;
-    }
     if (location.pathname === "/dashboard") {
       document.title = `${t("titles.dashboard")} - ${t("titles.appName")}`;
       return;
@@ -5725,14 +6069,13 @@ function AppShell() {
   }, [location.pathname, user?.role, t]);
 
   return (
-    <Layout user={user}>
+    <Layout user={user} onLogout={clearSession}>
       <div className="route-transition" key={location.pathname}>
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/dashboard" element={<DashboardPage onLoadProfile={loadProfile} user={user} apiFetch={apiFetch} onSessionInvalid={clearSession} />} />
           <Route path="/login" element={<LoginPage error={error} onLogin={login} />} />
           <Route path="/signup" element={<SignupPage error={error} onSignup={signup} references={publicReferences} />} />
-          <Route path="/settings" element={<SettingsPage user={user} onLogout={clearSession} />} />
           <Route path="*" element={<Navigate replace to="/" />} />
         </Routes>
       </div>

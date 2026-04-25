@@ -95,8 +95,8 @@ class ApiTests(APITestCase):
                 "username": "new-user",
                 "password": "new-password-123",
                 "email": "new-user@example.com",
-                "role": UserProfile.ROLE_SUPERVISEUR,
-                "matricule": "SUP-100",
+                "role": UserProfile.ROLE_COORDINATEUR,
+                "matricule": "COORD-100",
                 "corps_id": self.corps.id_corps,
                 "rank_id": self.rank.id_rank,
                 "speciality_id": self.speciality.id_speciality,
@@ -105,7 +105,7 @@ class ApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["role"], UserProfile.ROLE_SUPERVISEUR)
+        self.assertEqual(response.data["role"], UserProfile.ROLE_COORDINATEUR)
         self.assertEqual(response.data["matricule"], "SUP-100")
 
     def test_signup_requires_matricule_for_non_instructeur(self):
@@ -159,18 +159,18 @@ class ApiTests(APITestCase):
         self.assertEqual(response.data["role"], UserProfile.ROLE_INSTRUCTEUR)
         self.assertEqual(response.data["matricule"], "")
 
-    def test_supervisor_can_manage_references(self):
+    def test_admin_can_manage_references(self):
         user_model = get_user_model()
-        supervisor = user_model.objects.create_user(username="supervisor", password="sup-pass-1")
+        admin = user_model.objects.create_user(username="admin-ref", password="sup-pass-1")
         UserProfile.objects.create(
-            user=supervisor,
-            role=UserProfile.ROLE_SUPERVISEUR,
-            matricule="SUP-100",
+            user=admin,
+            role=UserProfile.ROLE_ADMIN,
+            matricule="ADM-100",
             corps=self.corps,
             rank=self.rank,
             speciality=self.speciality,
         )
-        self.client.force_authenticate(user=supervisor)
+        self.client.force_authenticate(user=admin)
 
         refs_response = self.client.get("/api/admin/references/")
         self.assertEqual(refs_response.status_code, status.HTTP_200_OK)
@@ -347,16 +347,14 @@ class ApiTests(APITestCase):
         self.assertEqual(correction_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(ControleCorrection.objects.count(), 1)
 
-    def test_superviseur_coordinateur_admin_dashboards(self):
+    def test_coordinateur_admin_dashboards(self):
         user_model = get_user_model()
         admin = user_model.objects.create_user(username="admin1", password="pass-1234")
-        superviseur = user_model.objects.create_user(username="sup1", password="pass-1234")
         coordinateur = user_model.objects.create_user(username="coord1", password="pass-1234")
         instructeur = user_model.objects.create_user(username="instr4", password="pass-1234")
         stageaire = user_model.objects.create_user(username="stag4", password="pass-1234")
 
         UserProfile.objects.create(user=admin, role=UserProfile.ROLE_ADMIN, matricule="A-1")
-        UserProfile.objects.create(user=superviseur, role=UserProfile.ROLE_SUPERVISEUR, matricule="SP-1")
         UserProfile.objects.create(user=coordinateur, role=UserProfile.ROLE_COORDINATEUR, matricule="CO-1")
         UserProfile.objects.create(user=instructeur, role=UserProfile.ROLE_INSTRUCTEUR, matricule="I-4")
         UserProfile.objects.create(user=stageaire, role=UserProfile.ROLE_STAGIAIRE, matricule="S-4")
@@ -369,12 +367,6 @@ class ApiTests(APITestCase):
         controle = Controle.objects.create(cours=cours, instructeur=instructeur, nom="Ctrl A", statut=Controle.STATUT_PUBLIE)
         soumission = SoumissionControle.objects.create(controle=controle, stagiaire=stageaire, commentaire="answer")
         Evaluation.objects.create(soumission=soumission, instructeur=instructeur, note=14, est_publiee=True, date_publication=timezone.now())
-
-        sup_token = self.client.post("/api/token/", {"username": "sup1", "password": "pass-1234"}, format="json").data["access"]
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {sup_token}")
-        sup_response = self.client.get("/api/dashboard/superviseur/")
-        self.assertEqual(sup_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(sup_response.data["role"], UserProfile.ROLE_SUPERVISEUR)
 
         coord_token = self.client.post("/api/token/", {"username": "coord1", "password": "pass-1234"}, format="json").data["access"]
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {coord_token}")
@@ -419,7 +411,7 @@ class ApiTests(APITestCase):
 
         csv_content = (
             f"username,email,password,role,matricule,est_civil,corps_id,rank_id,speciality_id\n"
-            f"bulk-two,bulk-two@example.com,StrongPass!123,Superviseur,S-BULK-2,false,{self.corps.id_corps},{self.rank.id_rank},{self.speciality.id_speciality}\n"
+            f"bulk-two,bulk-two@example.com,StrongPass!123,Coordinateur,S-BULK-2,false,{self.corps.id_corps},{self.rank.id_rank},{self.speciality.id_speciality}\n"
         )
         bulk_response = self.client.post(
             "/api/admin/accounts/bulk-csv/",
