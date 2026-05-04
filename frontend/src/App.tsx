@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import PdfViewer, { InlinePdfViewer, InlineDocxViewer } from "./PdfViewer";
 import { useTranslation } from "react-i18next";
@@ -127,7 +127,7 @@ type ClassementClass = {
   total: number;
   leaderboard: ClassementEntry[];
 };
-type StageaireClassementData = { classes: ClassementClass[] };
+
 type AdminClassementData = { classes: Omit<ClassementClass, "my_rank" | "my_moyenne">[] };
 
 type SubjectData = { id: string; label: string };
@@ -338,30 +338,43 @@ function MetricCard({ label, value }: { label: string; value: string | number })
 const PLATFORM_COLORS = ["#6366f1", "#10b981", "#06b6d4", "#f59e0b", "#ec4899"];
 
 function AdminPlatformChart({ platform }: { platform: { users_total: number; users_active: number; cours_total: number; controles_total: number; soumissions_total: number } }) {
-  const data = [
-    { name: "Utilisateurs", value: platform.users_total },
-    { name: "Actifs", value: platform.users_active },
-    { name: "Cours", value: platform.cours_total },
-    { name: "Contrôles", value: platform.controles_total },
+  const stats = [
+    { label: "Stagiaires", value: platform.users_total, color: "#6366f1", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /> },
+    { label: "Cours", value: platform.cours_total, color: "#10b981", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /> },
+    { label: "Contrôles", value: platform.controles_total, color: "#06b6d4", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /> },
+
   ];
+  const data = stats.map((s) => ({ name: s.label, value: s.value }));
   return (
-    <div className="mt-3 h-52" style={{ minWidth: 0 }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
-          <Tooltip
-            contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }}
-            cursor={{ fill: "#f1f5f9" }}
-          />
-          <Bar dataKey="value" name="Valeur" radius={[4, 4, 0, 0]} maxBarSize={56}>
-            {data.map((_, i) => (
-              <Cell key={i} fill={PLATFORM_COLORS[i % PLATFORM_COLORS.length]} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="mt-3 grid gap-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.label} className="flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 px-4 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: `${s.color}18` }}>
+              <svg className="h-5 w-5" fill="none" stroke={s.color} strokeWidth={1.8} viewBox="0 0 24 24">{s.icon}</svg>
+            </div>
+            <div>
+              <p className="text-xl font-bold text-app-dark leading-none">{s.value}</p>
+              <p className="mt-0.5 text-xs text-app-dark/50">{s.label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <ResponsiveContainer width="100%" height={176}>
+          <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+            <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} cursor={{ fill: "#f1f5f9" }} />
+            <Bar dataKey="value" name="Valeur" radius={[4, 4, 0, 0]} maxBarSize={56}>
+              {data.map((_, i) => (
+                <Cell key={i} fill={PLATFORM_COLORS[i % PLATFORM_COLORS.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
@@ -374,8 +387,8 @@ function AdminRoleChart({ users, onRoleClick }: { users: { role: string; is_acti
     Actifs: users.filter((u) => u.role === role && u.is_active).length,
   }));
   return (
-    <div className="mt-3 h-52" style={{ minWidth: 0 }}>
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="mt-3" style={{ minWidth: 0 }}>
+      <ResponsiveContainer width="100%" height={208}>
         <BarChart data={data} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}
           onClick={(e) => { if (e?.activeLabel) onRoleClick(e.activeLabel); }}
           style={{ cursor: "pointer" }}
@@ -597,7 +610,7 @@ function ReferenceManagementSection({
               <div key={speciality.id} className="flex items-center justify-between rounded border border-app-muted px-2 py-1">
                 <span className="text-xs">
                   {speciality.label} <span className="text-app-dark/50">({speciality.code})</span>
-                  {speciality.corps_id ? <span className="ml-1 text-app-dark/40">— {referencesData.corps.find((c) => c.id === speciality.corps_id)?.label ?? ""}</span> : null}
+                  {speciality.corps_id ? <span className="ml-1 text-app-dark/40">â€” {referencesData.corps.find((c) => c.id === speciality.corps_id)?.label ?? ""}</span> : null}
                 </span>
                 <div className="flex gap-1">
                   <button type="button" onClick={() => handleRenameSpeciality(speciality.id, speciality.label, speciality.code, speciality.corps_id ?? "")} className="rounded px-2 py-0.5 text-[11px] font-medium text-app-dark border border-app-muted hover:bg-app-soft">Éditer</button>
@@ -617,7 +630,7 @@ function HomePage() {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-10 grid gap-6">
 
-      {/* ── Hero banner ── */}
+      {/* â”€â”€ Hero banner â”€â”€ */}
       <div
         className="relative overflow-hidden rounded-2xl shadow-xl"
         style={{ background: "linear-gradient(135deg, #0E0F29 0%, #15173D 60%, #1E1F4A 100%)" }}
@@ -629,7 +642,7 @@ function HomePage() {
 
         <div className="relative flex flex-col gap-10 p-10 md:flex-row md:items-center md:justify-between">
 
-          {/* Left — text */}
+          {/* Left â€” text */}
           <div className="max-w-xl">
             <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "#982598" }}>
               Enterprise Training Platform
@@ -643,7 +656,7 @@ function HomePage() {
                 style={{ background: "#982598" }}
                 to="/login"
               >
-                Se connecter →
+                Se connecter â†’
               </Link>
               <Link
                 className="rounded-xl border px-6 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10"
@@ -655,7 +668,7 @@ function HomePage() {
             </div>
           </div>
 
-          {/* Right — illustration */}
+          {/* Right â€” illustration */}
           <div className="flex shrink-0 flex-col items-center gap-4">
             {/* Fake monitor */}
             <div
@@ -670,7 +683,7 @@ function HomePage() {
                   <div
                     className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white"
                     style={{ background: "#982598" }}
-                  >✓</div>
+                  >âœ“</div>
                   <div className="h-2.5 flex-1 rounded-full bg-white/20" />
                 </div>
               </div>
@@ -696,15 +709,29 @@ function HomePage() {
         </div>
       </div>
 
-      {/* ── Feature cards ── */}
+      {/* â”€â”€ Feature cards â”€â”€ */}
       <div className="grid gap-4 md:grid-cols-3">
         {[
-          { icon: "📚", title: "Cours structurés", desc: "Modules, matières, brochures et leçons organisés hiérarchiquement." },
-          { icon: "📝", title: "Contrôles & Corrections", desc: "Publiez des examens, recevez les soumissions et notez en ligne." },
-          { icon: "📊", title: "Suivi de progression", desc: "Tableaux de bord par rôle pour un suivi en temps réel." },
+          {
+            icon: <svg className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>,
+            title: "Cours structurés",
+            desc: "Modules, matières, brochures et leçons organisés hiérarchiquement.",
+          },
+          {
+            icon: <svg className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>,
+            title: "Contrôles & Corrections",
+            desc: "Publiez des examens, recevez les soumissions et notez en ligne.",
+          },
+          {
+            icon: <svg className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>,
+            title: "Suivi de progression",
+            desc: "Tableaux de bord par rôle pour un suivi en temps réel.",
+          },
         ].map((f) => (
           <div key={f.title} className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-            <span className="text-3xl">{f.icon}</span>
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl text-app-accent" style={{ background: "rgba(21,23,61,0.07)" }}>
+              {f.icon}
+            </div>
             <h3 className="mt-3 text-base font-bold text-app-dark">{f.title}</h3>
             <p className="mt-1 text-sm text-app-dark/60 leading-relaxed">{f.desc}</p>
           </div>
@@ -932,11 +959,23 @@ function DashboardPage({
   const [detailControleId, setDetailControleId] = useState<string | null>(null);
   const [detailControlePdf, setDetailControlePdf] = useState<{ base64: string; name: string; mimeType: string } | null>(null);
   const [detailControlePdfLoading, setDetailControlePdfLoading] = useState(false);
-  const [submissionAnswers, setSubmissionAnswers] = useState<Record<string, string>>({});
+  const [correctionFichier, setCorrectionFichier] = useState<Record<string, { base64: string; name: string; mimeType: string } | null>>({});
+  const [correctionFichierLoading, setCorrectionFichierLoading] = useState<Record<string, boolean>>({});
+  const submissionAnswers: Record<string, string> = {};
   const [submissionFiles, setSubmissionFiles] = useState<Record<string, File>>({});
   const [evalNote, setEvalNote] = useState<Record<string, string>>({});
   const [evalCorrection, setEvalCorrection] = useState<Record<string, string>>({});
   const [correctionText, setCorrectionText] = useState<Record<string, string>>({});
+  const [correctionPdf, setCorrectionPdf] = useState<Record<string, File | null>>({});
+  type InstallFichier = { id: string; titre: string; nom_fichier: string; uploaded_at: string };
+  const [installFichiers, setInstallFichiers] = useState<InstallFichier[]>([]);
+  const [installUploadFile, setInstallUploadFile] = useState<File | null>(null);
+  const [installUploadTitre, setInstallUploadTitre] = useState("");
+  const [installUploading, setInstallUploading] = useState(false);
+  const [feuilleRFichiers, setFeuilleRFichiers] = useState<InstallFichier[]>([]);
+  const [feuilleRUploadFile, setFeuilleRUploadFile] = useState<File | null>(null);
+  const [feuilleRUploadTitre, setFeuilleRUploadTitre] = useState("");
+  const [feuilleRUploading, setFeuilleRUploading] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pdfViewer, setPdfViewer] = useState<{ base64: string; name: string; mimeType: string } | null>(null);
   const [lessonModal, setLessonModal] = useState<{
@@ -944,19 +983,24 @@ function DashboardPage({
     files: Record<string, { base64: string; name: string; mimeType: string }>;
   } | null>(null);
   const [lessonModalLoading, setLessonModalLoading] = useState(false);
-  const [instructeurView, setInstructeurView] = useState<"dashboard" | "cours" | "controles" | "corriger" | "sujet">("dashboard");
-  const [stageaireView, setStageaireView] = useState<"dashboard" | "cours" | "controles" | "sujet" | "classement">("dashboard");
+  const [instructeurView, setInstructeurView] = useState<"dashboard" | "cours" | "controles" | "corriger" | "sujet" | "installation_logiciels">("dashboard");
+  const [stageaireView, setStageaireView] = useState<"dashboard" | "cours" | "controles" | "sujet" | "classement" | "installation_logiciels" | "feuille_redaction">("dashboard");
   const [coordinateurView, setCoordinateurView] = useState<"dashboard" | "reporting" | "export">("dashboard");
   const [coordNotifDismissed, setCoordNotifDismissed] = useState(false);
   const [brigadeSearch, setBrigadeSearch] = useState("");
   const [brigadeFilter, setBrigadeFilter] = useState<"tous" | "reussite" | "surveiller" | "sans_notes">("tous");
-  const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "bulk_csv" | "subjects" | "classes" | "references" | "events" | "classement" | "fichiers_renseignement">("overview");
+  const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "bulk_csv" | "subjects" | "classes" | "references" | "events" | "classement" | "fichiers_renseignement" | "modules" | "feuille_redaction">("overview");
   const [selectedAdminUser, setSelectedAdminUser] = useState<AdminDashboardData["users"][number] | null>(null);
   const [subjects, setSubjects] = useState<SubjectData[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
   const [subjectControls, setSubjectControls] = useState<SubjectControlData[]>([]);
   const [subjectCourses, setSubjectCourses] = useState<SubjectCourseData[]>([]);
   const [subjectTab, setSubjectTab] = useState<"subjects" | "controls" | "courses">("subjects");
+  const [adminModules, setAdminModules] = useState<Array<{ id: string; nom: string; matieres: Array<{ id: string; nom: string; cours_count: number }> }>>([]);
+  const [adminSelectedModule, setAdminSelectedModule] = useState<{ id: string; nom: string; matieres: Array<{ id: string; nom: string; cours_count: number }> } | null>(null);
+  const [adminSelectedMatiere, setAdminSelectedMatiere] = useState<{ id: string; nom: string; module_nom: string; brochures: Array<{ id: string; nom: string; cours_count: number }>; cours: Array<{ id: string; titre: string; description: string; instructeur: string; controles_count: number }> } | null>(null);
+  const [adminSelectedBrochure, setAdminSelectedBrochure] = useState<{ id: string; nom: string; matiere_nom: string; module_nom: string; cours: Array<{ id: string; titre: string; description: string; instructeur: string; controles_count: number }> } | null>(null);
+  const [adminModulesLoading, setAdminModulesLoading] = useState(false);
   const [newSubjectLabel, setNewSubjectLabel] = useState("");
   const [adminUserSearch, setAdminUserSearch] = useState("");
   const [adminUsersExpanded, setAdminUsersExpanded] = useState(false);
@@ -983,7 +1027,7 @@ function DashboardPage({
   const [showAccountPassword, setShowAccountPassword] = useState(false);
   const [resetPasswordState, setResetPasswordState] = useState<Record<number, { value: string; show: boolean; saved: string }>>({});
   const [emailResetState, setEmailResetState] = useState<Record<number, "idle" | "loading" | "sent" | "no_email" | "error">>({});
-  const [classementData, setClassementData] = useState<StageaireClassementData | null>(null);
+
   const [adminClassementData, setAdminClassementData] = useState<AdminClassementData | null>(null);
   const [adminFichiersRenseignement, setAdminFichiersRenseignement] = useState<Array<{ stagiaire_id: number; stagiaire_username: string; sujet_titre: string; nom_fichier: string; etat: string; has_fichier: boolean }> | null>(null);
   const [adminFichierTemplate, setAdminFichierTemplate] = useState<{ has_template: boolean; nom_fichier: string } | null>(null);
@@ -1081,10 +1125,17 @@ function DashboardPage({
         setInstructeurData(data);
         if (modResp.ok) { const mods = await modResp.json(); setModulesList(mods); }
       } else if (user.role === "Stagiaire") {
-        const response = await apiFetch("/api/dashboard/stageaire/");
+        const [response, allModsResp] = await Promise.all([
+          apiFetch("/api/dashboard/stageaire/"),
+          apiFetch("/api/modules/"),
+        ]);
         if (response.status === 403) { onSessionInvalid(); return; }
         if (!response.ok) throw new Error("failed");
         const data: StageaireDashboardData = await response.json();
+        if (data.modules_list.length === 0 && allModsResp.ok) {
+          const allMods: Array<{ id: string; nom: string; matieres: Array<{ id: string; nom: string }> }> = await allModsResp.json();
+          data.modules_list = allMods.map((m) => ({ ...m, matieres: m.matieres.map((mat) => ({ ...mat, cours_count: 0 })) }));
+        }
         setStageaireData(data);
         void loadStagiaireFichierStatus();
       } else if (user.role === "Coordinateur") {
@@ -1113,7 +1164,7 @@ function DashboardPage({
   }, [user?.role]);
 
   // Silently refresh admin data (no full-page spinner) when the admin navigates
-  // to a view that lists users — ensures they see accounts created by others.
+  // to a view that lists users â€” ensures they see accounts created by others.
   const [adminRefreshing, setAdminRefreshing] = useState(false);
   const reloadAdminData = async () => {
     if (!user || user.role !== "Admin") return;
@@ -1141,13 +1192,15 @@ function DashboardPage({
       void loadAdminFichiersRenseignement();
       void loadAdminFichierTemplate();
     }
+    if (adminView === "modules") {
+      setAdminModulesLoading(true);
+      apiFetch("/api/modules/").then(async (r) => {
+        if (r.ok) { const d = await r.json(); setAdminModules(d); }
+        setAdminModulesLoading(false);
+      });
+    }
   }, [adminView]);
 
-
-  const loadClassement = async () => {
-    const r = await apiFetch("/api/stageaire/classement/");
-    if (r.ok) { const d: StageaireClassementData = await r.json(); setClassementData(d); }
-  };
 
   const loadAdminClassement = async () => {
     const r = await apiFetch("/api/admin/classement/");
@@ -1297,15 +1350,20 @@ function DashboardPage({
 
   const handlePublishCorrection = async (controleId: string) => {
     const texte = correctionText[controleId] ?? "";
+    const pdf = correctionPdf[controleId] ?? null;
+    const formData = new FormData();
+    formData.append("titre", "Correction");
+    formData.append("texte_correction", texte);
+    if (pdf) formData.append("fichier_correction", pdf);
     const response = await apiFetch(`/api/instructeur/controles/${controleId}/publish-correction/`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ titre: "Correction", texte_correction: texte }),
+      body: formData,
     });
     if (response.ok) {
       const ctrl = instructeurData?.controles_list.find((c) => c.id === controleId);
       const label = ctrl ? `« ${ctrl.name} »` : controleId.slice(0, 8);
       setActionMessage(`Correction publiée pour le contrôle ${label}.`);
+      setCorrectionPdf((prev) => ({ ...prev, [controleId]: null }));
       await loadDashboard();
     }
   };
@@ -1335,22 +1393,6 @@ function DashboardPage({
     if (!response.ok) return;
     const data = await response.json();
     setSelectedBrochure({ id: data.brochure_id, nom: data.brochure_nom, matiere_nom: data.matiere_nom, module_nom: data.module_nom, cours: data.cours });
-  };
-
-  const handleOpenCours = async (coursId: string) => {
-    const response = await apiFetch(`/api/stageaire/cours/${coursId}/`);
-    if (!response.ok) return;
-    const data = await response.json();
-    setCoursFileCache({});
-    setSelectedCours(data);
-    // Fetch all course files so they render inline
-    for (const f of data.fichiers ?? []) {
-      apiFetch(`/api/stageaire/cours/${coursId}/fichier/${f.id_cours_fichier}/`).then(async (r) => {
-        if (!r.ok) return;
-        const fd: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
-        setCoursFileCache((prev) => ({ ...prev, [f.id_cours_fichier]: { base64: fd.fichier_base64, name: fd.nom_fichier, mimeType: fd.mime_type } }));
-      });
-    }
   };
 
   const openCoursModal = async (coursId: string) => {
@@ -1733,7 +1775,7 @@ function DashboardPage({
       await reloadAdminData();
     } else if (result.errors?.length) {
       setCsvErrors(result.errors as Array<{ line: number; error: string }>);
-      setActionMessage(`Import echoue — ${result.error_count ?? result.errors.length} erreur(s). Voir details ci-dessous.`);
+      setActionMessage(`Import echoue â€” ${result.error_count ?? result.errors.length} erreur(s). Voir details ci-dessous.`);
     } else {
       setCsvErrors([]);
       setActionMessage(result.detail ?? "Import echoue.");
@@ -1772,6 +1814,97 @@ function DashboardPage({
       setDetailControlePdf({ base64: data.fichier_base64, name: data.nom_fichier || "enonce", mimeType: data.mime_type || "" });
     }
     setDetailControlePdfLoading(false);
+  };
+
+  const loadCorrectionFichier = async (controleId: string) => {
+    setCorrectionFichierLoading((prev) => ({ ...prev, [controleId]: true }));
+    const response = await apiFetch(`/api/stageaire/controles/${controleId}/correction-fichier/`);
+    if (response.ok) {
+      const data: { fichier_base64: string; nom_fichier: string; mime_type: string } = await response.json();
+      setCorrectionFichier((prev) => ({ ...prev, [controleId]: { base64: data.fichier_base64, name: data.nom_fichier || "correction.pdf", mimeType: data.mime_type || "application/pdf" } }));
+    } else {
+      setActionMessage("Aucun fichier de correction disponible pour ce contrôle.");
+    }
+    setCorrectionFichierLoading((prev) => ({ ...prev, [controleId]: false }));
+  };
+
+  const loadInstallFichiers = async () => {
+    const r = await apiFetch("/api/installation-logiciels/fichiers/");
+    if (r.ok) { const d: { fichiers: InstallFichier[] } = await r.json(); setInstallFichiers(d.fichiers); }
+  };
+
+  const handleInstallUpload = async () => {
+    if (!installUploadFile) return;
+    setInstallUploading(true);
+    const fichier_base64 = await readFileAsBase64(installUploadFile);
+    const r = await apiFetch("/api/instructeur/installation-logiciels/upload/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titre: installUploadTitre || installUploadFile.name, fichier_base64, nom_fichier: installUploadFile.name, mime_type: installUploadFile.type || "application/octet-stream" }),
+    });
+    if (r.ok) {
+      setInstallUploadFile(null);
+      setInstallUploadTitre("");
+      await loadInstallFichiers();
+      setActionMessage("Fichier partagé avec succès.");
+    }
+    setInstallUploading(false);
+  };
+
+  const handleInstallDelete = async (id: string) => {
+    if (!confirm("Supprimer ce fichier ?")) return;
+    await apiFetch(`/api/instructeur/installation-logiciels/${id}/supprimer/`, { method: "DELETE" });
+    await loadInstallFichiers();
+  };
+
+  const handleInstallDownload = async (id: string, nom: string) => {
+    const r = await apiFetch(`/api/installation-logiciels/fichiers/${id}/`);
+    if (!r.ok) { setActionMessage("Fichier introuvable."); return; }
+    const d: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(d.fichier_base64, d.nom_fichier || nom, d.mime_type);
+  };
+
+  const loadFeuilleRFichiers = async () => {
+    const r = await apiFetch("/api/feuille-redaction/fichiers/");
+    if (r.ok) { const d: { fichiers: InstallFichier[] } = await r.json(); setFeuilleRFichiers(d.fichiers); }
+  };
+
+  const handleFeuilleRUpload = async () => {
+    if (!feuilleRUploadFile) return;
+    setFeuilleRUploading(true);
+    const fichier_base64 = await readFileAsBase64(feuilleRUploadFile);
+    const r = await apiFetch("/api/admin/feuille-redaction/upload/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titre: feuilleRUploadTitre || feuilleRUploadFile.name, fichier_base64, nom_fichier: feuilleRUploadFile.name, mime_type: feuilleRUploadFile.type || "application/octet-stream" }),
+    });
+    if (r.ok) {
+      setFeuilleRUploadFile(null);
+      setFeuilleRUploadTitre("");
+      await loadFeuilleRFichiers();
+      setActionMessage("Feuille de rédaction partagée avec succès.");
+    }
+    setFeuilleRUploading(false);
+  };
+
+  const handleFeuilleRDelete = async (id: string) => {
+    if (!confirm("Supprimer ce fichier ?")) return;
+    await apiFetch(`/api/admin/feuille-redaction/${id}/supprimer/`, { method: "DELETE" });
+    await loadFeuilleRFichiers();
+  };
+
+  const handleFeuilleRDownload = async (id: string, nom: string) => {
+    const r = await apiFetch(`/api/feuille-redaction/fichiers/${id}/`);
+    if (!r.ok) { setActionMessage("Fichier introuvable."); return; }
+    const d: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(d.fichier_base64, d.nom_fichier || nom, d.mime_type);
+  };
+
+  const handleFeuilleRView = async (id: string, nom: string) => {
+    const r = await apiFetch(`/api/feuille-redaction/fichiers/${id}/`);
+    if (!r.ok) { setActionMessage("Fichier introuvable."); return; }
+    const d: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    setPdfViewer({ base64: d.fichier_base64, name: d.nom_fichier || nom, mimeType: d.mime_type || "application/pdf" });
   };
 
   const readFileAsBase64 = (file: File): Promise<string> =>
@@ -1884,7 +2017,7 @@ function DashboardPage({
         />
       ) : null}
 
-      {/* Lesson modal — centered overlay */}
+      {/* Lesson modal â€” centered overlay */}
       {(lessonModal || lessonModalLoading) ? (
         <div
           className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-app-dark/60 px-4"
@@ -1905,7 +2038,7 @@ function DashboardPage({
                     ) : null}
                   </>
                 ) : (
-                  <p className="text-sm text-white/70">Chargement…</p>
+                  <p className="text-sm text-white/70">Chargementâ€¦</p>
                 )}
               </div>
               <button
@@ -1914,7 +2047,7 @@ function DashboardPage({
                 className="shrink-0 rounded-lg px-2 py-1 text-white/70 transition hover:bg-white/10 hover:text-white"
                 aria-label="Fermer"
               >
-                ✕
+                âœ•
               </button>
             </div>
 
@@ -1960,7 +2093,7 @@ function DashboardPage({
                         return (
                           <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
                             <div className="skeleton h-5 w-5 rounded" />
-                            <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}…</span>
+                            <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}â€¦</span>
                           </div>
                         );
                       }
@@ -1975,7 +2108,7 @@ function DashboardPage({
 
                       return (
                         <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
-                          <span className="text-base">📎</span>
+                          <span className="text-base">ðŸ“Ž</span>
                           <div className="flex-1">
                             <p className="text-sm font-semibold text-app-dark">{cached.name}</p>
                             <p className="text-xs text-app-dark/40">Aperçu non disponible pour ce format</p>
@@ -2002,7 +2135,7 @@ function DashboardPage({
       {toastState ? (
         <div className={`fixed right-4 top-20 z-40 max-w-md rounded-lg px-4 py-3 text-sm shadow-lg ${toastState.kind === "success" ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"} ${toastState.closing ? "toast-exit" : `toast-enter ${toastState.kind === "error" ? "shake-error" : ""}`}`}>
           <span className={toastState.kind === "success" ? "checkmark-pop font-semibold" : "font-semibold"}>
-            {toastState.kind === "success" ? "✓ " : "⚠ "}
+            {toastState.kind === "success" ? "âœ“ " : "âš  "}
           </span>
           {toastState.message}
         </div>
@@ -2028,6 +2161,9 @@ function DashboardPage({
               </AdminNavButton>
               <AdminNavButton active={instructeurView === "sujet"} onClick={() => setInstructeurView("sujet")}>
                 Sujet fin de stage ({instructeurData.sujets_fin_stage.total})
+              </AdminNavButton>
+              <AdminNavButton active={instructeurView === "installation_logiciels"} onClick={() => setInstructeurView("installation_logiciels")}>
+                Installation & Logiciels
               </AdminNavButton>
             </div>
           </aside>
@@ -2060,15 +2196,15 @@ function DashboardPage({
                 <div className="mt-4 grid gap-2 md:grid-cols-3 border-t border-app-muted/60 pt-4">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-app-dark/50">Matricule</p>
-                    <p className="mt-0.5 text-sm font-semibold">{user?.matricule || "—"}</p>
+                    <p className="mt-0.5 text-sm font-semibold">{user?.matricule || "â€”"}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-app-dark/50">Corps</p>
-                    <p className="mt-0.5 text-sm font-semibold">{user?.corps?.label ?? (user?.est_civil ? "Civil" : "—")}</p>
+                    <p className="mt-0.5 text-sm font-semibold">{user?.corps?.label ?? (user?.est_civil ? "Civil" : "â€”")}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-app-dark/50">Email</p>
-                    <p className="mt-0.5 text-sm font-semibold truncate">{user?.email || "—"}</p>
+                    <p className="mt-0.5 text-sm font-semibold truncate">{user?.email || "â€”"}</p>
                   </div>
                 </div>
               </article>
@@ -2085,7 +2221,7 @@ function DashboardPage({
                     <p className="mt-1 text-xl font-semibold">{instructeurData.cours.published} <span className="text-sm font-normal text-app-dark/50">/ {instructeurData.cours.total}</span></p>
                   </div>
                   <div className="rounded-lg border border-app-muted/70 bg-app-soft px-3 py-2">
-                    <p className="text-xs uppercase tracking-wide text-app-dark/60">À corriger</p>
+                    <p className="text-xs uppercase tracking-wide text-app-dark/60">Ã€ corriger</p>
                     <p className="mt-1 text-xl font-semibold text-app-accent">{instructeurData.controles.pending_corrections}</p>
                   </div>
                 </div>
@@ -2115,7 +2251,7 @@ function DashboardPage({
                       value={courseModuleId}
                       onChange={(e) => { setCourseModuleId(e.target.value); setCourseMatiereId(""); }}
                     >
-                      <option value="">— Sélectionner un module —</option>
+                      <option value="">â€” Sélectionner un module â€”</option>
                       {modulesList.map((m) => (
                         <option key={m.id} value={m.id}>{m.nom}</option>
                       ))}
@@ -2129,7 +2265,7 @@ function DashboardPage({
                       onChange={(e) => setCourseMatiereId(e.target.value)}
                       disabled={!courseModuleId}
                     >
-                      <option value="">— Sélectionner une matière —</option>
+                      <option value="">â€” Sélectionner une matière â€”</option>
                       {(modulesList.find((m) => m.id === courseModuleId)?.matieres ?? []).map((mat) => (
                         <option key={mat.id} value={mat.id}>{mat.nom}</option>
                       ))}
@@ -2142,10 +2278,10 @@ function DashboardPage({
                       value={courseClasseId}
                       onChange={(e) => setCourseClasseId(e.target.value)}
                     >
-                      <option value="">— Toutes les classes —</option>
+                      <option value="">â€” Toutes les classes â€”</option>
                       {instructeurData.classes.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.label} ({c.code} · Brigade {c.brigade})
+                          {c.label} ({c.code} Â· Brigade {c.brigade})
                         </option>
                       ))}
                     </select>
@@ -2174,12 +2310,12 @@ function DashboardPage({
                   </svg>
                   <input
                     className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                    placeholder="Rechercher un cours…"
+                    placeholder="Rechercher un coursâ€¦"
                     value={instructeurCoursSearch}
                     onChange={(e) => setInstructeurCoursSearch(e.target.value)}
                   />
                   {instructeurCoursSearch ? (
-                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setInstructeurCoursSearch("")} type="button">✕</button>
+                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setInstructeurCoursSearch("")} type="button">âœ•</button>
                   ) : null}
                 </div>
                 <div className="mt-3 space-y-2">
@@ -2206,7 +2342,7 @@ function DashboardPage({
                             await loadDashboard();
                           }}
                         >
-                          🗑
+                          ðŸ—‘
                         </button>
                       </div>
                     ))}
@@ -2283,7 +2419,7 @@ function DashboardPage({
                           await loadDashboard();
                         }}
                       >
-                        🗑
+                        ðŸ—‘
                       </button>
                     </div>
                   ))}
@@ -2314,15 +2450,26 @@ function DashboardPage({
                         <textarea
                           rows={3}
                           className="rounded-lg border border-app-muted bg-app-soft px-3 py-2 text-sm font-normal normal-case tracking-normal outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20 resize-none"
-                          placeholder="Rédigez la correction modèle…"
+                          placeholder="Rédigez la correction modèleâ€¦"
                           value={correctionText[c.id] ?? ""}
                           onChange={(e) => setCorrectionText((prev) => ({ ...prev, [c.id]: e.target.value }))}
                         />
                       </label>
+                      <div className="mt-2 grid gap-1">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Correction PDF (corrigé officiel)</p>
+                        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-app-muted bg-app-soft px-3 py-2 text-xs text-app-dark/60 hover:border-app-accent hover:bg-white transition">
+                          <svg className="h-4 w-4 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                          {correctionPdf[c.id] ? correctionPdf[c.id]!.name : "Joindre un PDFâ€¦"}
+                          <input type="file" accept=".pdf" className="hidden" onChange={(e) => setCorrectionPdf((prev) => ({ ...prev, [c.id]: e.target.files?.[0] ?? null }))} />
+                        </label>
+                        {correctionPdf[c.id] && (
+                          <button type="button" className="self-start text-xs text-red-400 hover:text-red-600" onClick={() => setCorrectionPdf((prev) => ({ ...prev, [c.id]: null }))}>Retirer le fichier</button>
+                        )}
+                      </div>
                       <button
                         className="mt-2 rounded-lg bg-app-dark px-4 py-1.5 text-xs font-semibold text-white transition hover:opacity-80 disabled:opacity-40"
                         type="button"
-                        disabled={!correctionText[c.id]}
+                        disabled={!correctionText[c.id] && !correctionPdf[c.id]}
                         onClick={() => void handlePublishCorrection(c.id)}
                       >
                         Publier correction
@@ -2338,7 +2485,7 @@ function DashboardPage({
           {/* Corriger contrôle */}
           {instructeurView === "corriger" ? (
             <>
-              {/* ── Soumissions à noter ── */}
+              {/* â”€â”€ Soumissions à noter â”€â”€ */}
               <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
                   <div>
@@ -2353,12 +2500,11 @@ function DashboardPage({
                 <div className="divide-y divide-app-muted/40">
                   {instructeurData.pending_submissions.length === 0 && (
                     <div className="flex flex-col items-center gap-2 py-10 text-center">
-                      <span className="text-3xl">✅</span>
+                      <span className="text-3xl">âœ…</span>
                       <p className="text-sm font-medium text-app-dark/50">Aucune soumission en attente</p>
                     </div>
                   )}
                   {instructeurData.pending_submissions.map((s) => {
-                    const stagiaire = instructeurData.pending_submissions.find((x) => x.soumission_id === s.soumission_id);
                     return (
                       <div key={s.soumission_id} className="p-5">
                         {/* Card header */}
@@ -2369,7 +2515,7 @@ function DashboardPage({
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-app-dark">{s.controle_name}</p>
                             <p className="text-xs text-app-dark/50 mt-0.5">
-                              Stagiaire #{s.stagiaire_id} · soumis le {new Date(s.submitted_at).toLocaleDateString("fr-FR")}
+                              Stagiaire #{s.stagiaire_id} Â· soumis le {new Date(s.submitted_at).toLocaleDateString("fr-FR")}
                             </p>
                           </div>
                           <span className="shrink-0 rounded-full bg-yellow-100 px-2.5 py-0.5 text-[11px] font-semibold text-yellow-700">En attente</span>
@@ -2404,7 +2550,7 @@ function DashboardPage({
                             <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Commentaire</label>
                             <input
                               className="rounded-lg border border-app-muted bg-app-soft px-3 py-2 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
-                              placeholder="Remarque optionnelle…"
+                              placeholder="Remarque optionnelleâ€¦"
                               value={evalCorrection[s.soumission_id] ?? ""}
                               onChange={(e) => setEvalCorrection((prev) => ({ ...prev, [s.soumission_id]: e.target.value }))}
                             />
@@ -2417,7 +2563,7 @@ function DashboardPage({
                           disabled={!evalNote[s.soumission_id]}
                           onClick={() => void handleEvaluate(s.soumission_id)}
                         >
-                          ✓ Publier la note
+                          âœ“ Publier la note
                         </button>
                       </div>
                     );
@@ -2425,7 +2571,7 @@ function DashboardPage({
                 </div>
               </div>
 
-              {/* ── Publier la correction ── */}
+              {/* â”€â”€ Publier la correction â”€â”€ */}
               <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
                 <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
                   <div>
@@ -2440,7 +2586,7 @@ function DashboardPage({
                 <div className="divide-y divide-app-muted/40">
                   {instructeurData.controles_list.length === 0 && (
                     <div className="flex flex-col items-center gap-2 py-10 text-center">
-                      <span className="text-3xl">📋</span>
+                      <span className="text-3xl">ðŸ“‹</span>
                       <p className="text-sm font-medium text-app-dark/50">Aucun contrôle disponible</p>
                     </div>
                   )}
@@ -2466,25 +2612,122 @@ function DashboardPage({
                         <textarea
                           rows={3}
                           className="rounded-lg border border-app-muted bg-app-soft px-3 py-2 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20 resize-none"
-                          placeholder="Rédigez la correction modèle…"
+                          placeholder="Rédigez la correction modèleâ€¦"
                           value={correctionText[c.id] ?? ""}
                           onChange={(e) => setCorrectionText((prev) => ({ ...prev, [c.id]: e.target.value }))}
                         />
+                      </div>
+                      {/* PDF correction */}
+                      <div className="grid gap-1 mb-3">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Correction PDF (corrigé officiel)</p>
+                        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-app-muted bg-app-soft px-3 py-2 text-xs text-app-dark/60 hover:border-app-accent hover:bg-white transition">
+                          <svg className="h-4 w-4 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                          {correctionPdf[c.id] ? correctionPdf[c.id]!.name : "Joindre un PDFâ€¦"}
+                          <input type="file" accept=".pdf" className="hidden" onChange={(e) => setCorrectionPdf((prev) => ({ ...prev, [c.id]: e.target.files?.[0] ?? null }))} />
+                        </label>
+                        {correctionPdf[c.id] && (
+                          <button type="button" className="self-start text-xs text-red-400 hover:text-red-600" onClick={() => setCorrectionPdf((prev) => ({ ...prev, [c.id]: null }))}>Retirer le fichier</button>
+                        )}
                       </div>
                       <button
                         type="button"
                         className="rounded-xl px-5 py-2 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
                         style={{ background: "#982598" }}
-                        disabled={!correctionText[c.id]}
+                        disabled={!correctionText[c.id] && !correctionPdf[c.id]}
                         onClick={() => void handlePublishCorrection(c.id)}
                       >
-                        ✓ Publier la correction
+                        âœ“ Publier la correction
                       </button>
                     </div>
                   ))}
                 </div>
               </div>
             </>
+          ) : null}
+
+          {/* Installation & Logiciels */}
+          {instructeurView === "installation_logiciels" ? (
+            <div className="grid gap-5">
+              {/* Upload form */}
+              <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
+                <div className="flex items-center gap-3 border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                  <svg className="h-4 w-4 text-white/70" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                  <p className="font-bold text-white">Partager un fichier Word</p>
+                </div>
+                <div className="p-5 grid gap-3">
+                  <div className="grid gap-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Titre (optionnel)</label>
+                    <input
+                      className="rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
+                      placeholder="Ex : Guide d'installation Visual Studioâ€¦"
+                      value={installUploadTitre}
+                      onChange={(e) => setInstallUploadTitre(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Fichier Word (.doc, .docx)</label>
+                    <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-app-muted bg-app-soft px-4 py-3 transition hover:border-app-accent hover:bg-white">
+                      <svg className="h-5 w-5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                      <span className="text-sm text-app-dark/60">{installUploadFile ? installUploadFile.name : "Choisir un fichier Wordâ€¦"}</span>
+                      <input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={(e) => setInstallUploadFile(e.target.files?.[0] ?? null)} />
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!installUploadFile || installUploading}
+                    onClick={() => void handleInstallUpload()}
+                    className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
+                    style={{ background: "#15173D" }}
+                  >
+                    {installUploading ? (
+                      <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
+                    ) : (
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                    )}
+                    {installUploading ? "Envoi en coursâ€¦" : "Partager le fichier"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Files list */}
+              <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                  <p className="font-bold text-white">Fichiers partagés</p>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-white/20 px-3 py-0.5 text-xs font-bold text-white">{installFichiers.length}</span>
+                    <button type="button" onClick={() => void loadInstallFichiers()} className="flex items-center gap-1 rounded-lg border border-white/20 px-2.5 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 transition">
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      Actualiser
+                    </button>
+                  </div>
+                </div>
+                <div className="divide-y divide-app-muted/40">
+                  {installFichiers.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 py-10 text-center">
+                      <svg className="h-10 w-10 text-app-dark/15" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      <p className="text-sm text-app-dark/40">Aucun fichier partagé pour le moment.</p>
+                    </div>
+                  ) : installFichiers.map((f) => (
+                    <div key={f.id} className="flex items-center gap-4 px-5 py-3">
+                      <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
+                        <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                          Télécharger
+                        </button>
+                        <button type="button" onClick={() => void handleInstallDelete(f.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 transition" title="Supprimer">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           ) : null}
 
           {/* Sujet fin de stage */}
@@ -2506,7 +2749,7 @@ function DashboardPage({
                   {instructeurData.sujets_fin_stage.list.map((s, i) => (
                     <div className="rounded border border-app-muted p-3" key={i}>
                       <p className="text-sm font-semibold">{s.sujet}</p>
-                      <p className="text-xs text-app-dark/60">Stagiaire #{s.stagiaire_id} · État: <span className={s.etat === "EN_COURS" ? "text-app-accent font-semibold" : ""}>{s.etat}</span></p>
+                      <p className="text-xs text-app-dark/60">Stagiaire #{s.stagiaire_id} Â· État: <span className={s.etat === "EN_COURS" ? "text-app-accent font-semibold" : ""}>{s.etat}</span></p>
                     </div>
                   ))}
                   {instructeurData.sujets_fin_stage.list.length === 0 ? <EmptyState message="Aucun sujet de fin de stage assigné." /> : null}
@@ -2520,11 +2763,11 @@ function DashboardPage({
 
       {user.role === "Stagiaire" && stageaireData ? (
         <section className="mt-6 flex gap-0 min-h-[calc(100vh-120px)]">
-          {/* ── Sidebar ── */}
+          {/* â”€â”€ Sidebar â”€â”€ */}
           <aside className="sidebar-animated w-56 min-w-[14rem] flex-shrink-0 flex flex-col overflow-hidden rounded-l-2xl border border-r-0 border-app-muted bg-white shadow-sm">
 
             {/* Profile header */}
-            <div className="px-4 pt-5 pb-4 border-b border-app-muted/60" style={{ background: "linear-gradient(160deg,#15173D 0%,#1e2050 100%)" }}>
+            <div className="px-4 pt-5 pb-4 border-b border-app-muted/60" style={{ background: "linear-gradient(160deg,#15173D 0%,#1E1F4A 100%)" }}>
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full text-base font-bold text-white ring-2 ring-white/20" style={{ background: "#982598" }}>
                   {user.username.charAt(0).toUpperCase()}
@@ -2678,6 +2921,44 @@ function DashboardPage({
                 );
               })}
 
+              {/* Installation & Logiciels */}
+              {(["installation_logiciels"] as const).map((tab) => {
+                const active = stageaireView === tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); void loadInstallFichiers(); }}
+                    className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
+                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                  >
+                    <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <span className="flex-1">Installation & Logiciels</span>
+                  </button>
+                );
+              })}
+
+              {/* Feuille de rédaction */}
+              {(["feuille_redaction"] as const).map((tab) => {
+                const active = stageaireView === tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); void loadFeuilleRFichiers(); }}
+                    className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
+                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                  >
+                    <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    <span className="flex-1">Feuille de rédaction</span>
+                  </button>
+                );
+              })}
+
             </nav>
 
             {/* Footer stats */}
@@ -2700,10 +2981,10 @@ function DashboardPage({
             </div>
           </aside>
 
-          {/* ── Main content ── */}
+          {/* â”€â”€ Main content â”€â”€ */}
           <div className="flex-1 overflow-y-auto rounded-r-2xl border border-app-muted bg-app-soft/40 p-6 grid gap-5 content-start">
 
-            {/* ── DASHBOARD ── */}
+            {/* â”€â”€ DASHBOARD â”€â”€ */}
             {stageaireView === "dashboard" ? (
               <>
                 {/* Hero banner */}
@@ -2719,7 +3000,7 @@ function DashboardPage({
                       <p className="mt-2 max-w-sm text-sm text-white/60">Accédez à vos cours, suivez vos contrôles et consultez votre progression.</p>
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button className="rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#982598" }} onClick={() => { setStageaireView("cours"); setModulesExpanded(true); }} type="button">
-                          Mes modules →
+                          Mes modules â†’
                         </button>
                         {stageaireData.controls.pending_count > 0 && (
                           <button className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20" onClick={() => setStageaireView("controles")} type="button">
@@ -2818,10 +3099,10 @@ function DashboardPage({
                     </div>
                     <div className="grid grid-cols-2 gap-3 border-t border-app-muted/60 pt-3">
                       {[
-                        { label: "Matricule", value: user?.matricule || "—" },
-                        { label: "Corps", value: user?.corps?.label ?? (user?.est_civil ? "Civil" : "—") },
-                        { label: "Email", value: user?.email || "—" },
-                        { label: "Spécialité", value: user?.speciality?.label || "—" },
+                        { label: "Matricule", value: user?.matricule || "â€”" },
+                        { label: "Corps", value: user?.corps?.label ?? (user?.est_civil ? "Civil" : "â€”") },
+                        { label: "Email", value: user?.email || "â€”" },
+                        { label: "Spécialité", value: user?.speciality?.label || "â€”" },
                       ].map((f) => (
                         <div key={f.label}>
                           <p className="text-xs text-app-dark/40">{f.label}</p>
@@ -2829,7 +3110,7 @@ function DashboardPage({
                         </div>
                       ))}
                     </div>
-                    {/* Fichier de renseignement — only shown until submitted */}
+                    {/* Fichier de renseignement â€” only shown until submitted */}
                     {stagiaireFichierStatus !== null && !stagiaireFichierStatus.has_fichier && (
                       <div className="border-t border-app-muted/60 pt-3 mt-3">
                         <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Fichier de renseignement</p>
@@ -2864,27 +3145,11 @@ function DashboardPage({
                     )}
                   </article>
 
-                  {/* Classes + notes */}
+                  {/* Notes */}
+                  {stageaireData.notes.length > 0 && (
                   <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-3">Mes classes</p>
-                    {stageaireData.classes.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {stageaireData.classes.map((entry) => (
-                          <div key={entry.classe_code} className="rounded-xl border border-app-muted/70 bg-app-soft px-3 py-2">
-                            <p className="text-sm font-bold text-app-dark">{entry.classe_label || entry.classe_code}</p>
-                            <p className="text-xs text-app-dark/50">{entry.brigade_code}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-2 py-4 text-center">
-                        <svg className="h-8 w-8 text-app-dark/20" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
-                        <p className="text-xs text-app-dark/40 italic">Aucune classe assignée pour le moment.</p>
-                      </div>
-                    )}
-                    {stageaireData.notes.length > 0 && (
-                      <>
-                        <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Notes publiées</p>
+                    <>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Notes publiées</p>
                         <div className="space-y-1.5">
                           {stageaireData.notes.slice(0, 3).map((note, index) => (
                             <div key={`${note.controle}-${index}`} className="flex items-center justify-between rounded-lg border border-app-muted/60 bg-app-soft px-3 py-1.5">
@@ -2896,13 +3161,13 @@ function DashboardPage({
                           ))}
                           {stageaireData.notes.length > 3 && (
                             <button type="button" onClick={() => { setStageaireView("controles"); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); }} className="text-xs text-app-accent font-semibold hover:underline">
-                              +{stageaireData.notes.length - 3} autre{stageaireData.notes.length - 3 > 1 ? "s" : ""} →
+                              +{stageaireData.notes.length - 3} autre{stageaireData.notes.length - 3 > 1 ? "s" : ""} â†’
                             </button>
                           )}
                         </div>
-                      </>
-                    )}
+                    </>
                   </article>
+                  )}
                 </div>
 
                 {stageaireData.notifications.latest.length > 0 && (
@@ -2940,7 +3205,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* ── COURS — no module selected ── */}
+            {/* â”€â”€ COURS â€” no module selected â”€â”€ */}
             {stageaireView === "cours" && !selectedModule && !selectedMatiere && !selectedCours ? (
               <article className="rounded-2xl border border-app-muted bg-white p-8 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Modules de formation</p>
@@ -2978,7 +3243,7 @@ function DashboardPage({
               </article>
             ) : null}
 
-            {/* ── COURS — matière list within a module ── */}
+            {/* â”€â”€ COURS â€” matière list within a module â”€â”€ */}
             {stageaireView === "cours" && selectedModule && !selectedMatiere && !selectedCours ? (
               <>
                 {/* Breadcrumb */}
@@ -3034,7 +3299,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* ── COURS — matière: brochures or direct cours ── */}
+            {/* â”€â”€ COURS â€” matière: brochures or direct cours â”€â”€ */}
             {stageaireView === "cours" && selectedMatiere && !selectedBrochure && !selectedCours ? (
               <>
                 {/* Breadcrumb */}
@@ -3048,7 +3313,7 @@ function DashboardPage({
 
                 {selectedMatiere.brochures.length > 0 ? (
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures — {selectedMatiere.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures â€” {selectedMatiere.nom}</p>
                     <div className="grid gap-3 md:grid-cols-2">
                       {selectedMatiere.brochures.map((b) => (
                         <button key={`brochure-${b.id}`} type="button" onClick={() => void handleOpenBrochure(b.id)}
@@ -3074,7 +3339,7 @@ function DashboardPage({
                   </article>
                 ) : (
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Cours — {selectedMatiere.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Cours â€” {selectedMatiere.nom}</p>
                     {selectedMatiere.cours.length > 0 ? (
                       <div className="grid gap-3 md:grid-cols-2">
                         {selectedMatiere.cours.map((c) => (
@@ -3115,7 +3380,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* ── COURS — brochure cours list ── */}
+            {/* â”€â”€ COURS â€” brochure cours list â”€â”€ */}
             {stageaireView === "cours" && selectedBrochure && !selectedCours ? (
               <>
                 {/* Breadcrumb */}
@@ -3129,7 +3394,7 @@ function DashboardPage({
 
                 <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                   <div className="flex items-center gap-3 flex-wrap mb-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours — {selectedBrochure.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours â€” {selectedBrochure.nom}</p>
                     <TagBadge nom={selectedBrochure.nom} />
                   </div>
                   {selectedBrochure.cours.length > 0 ? (
@@ -3171,7 +3436,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* Cours — detail with PDF viewer */}
+            {/* Cours â€” detail with PDF viewer */}
             {stageaireView === "cours" && selectedCours ? (
               <>
                 {/* Back button + header */}
@@ -3181,7 +3446,7 @@ function DashboardPage({
                     onClick={() => { setSelectedCours(null); setCoursFileCache({}); }}
                     className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-white px-3 py-2 text-sm font-semibold text-app-dark shadow-sm transition hover:bg-app-soft"
                   >
-                    ← Retour aux cours
+                    â† Retour aux cours
                   </button>
                   {selectedCours.matiere ? (
                     <span className="text-sm text-app-dark/50">{selectedCours.matiere}</span>
@@ -3200,7 +3465,7 @@ function DashboardPage({
                   <p className="mt-3 text-xs text-app-dark/50">Instructeur : <span className="font-semibold text-app-dark">{selectedCours.instructeur}</span> &mdash; Déposé le {selectedCours.date_depot}</p>
                 </article>
 
-                {/* Course files — inline viewer */}
+                {/* Course files â€” inline viewer */}
                 {selectedCours.fichiers.map((f) => {
                   const cached = coursFileCache[f.id_cours_fichier];
                   const isPdf = cached
@@ -3215,7 +3480,7 @@ function DashboardPage({
                     return (
                       <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
                         <div className="skeleton h-5 w-5 rounded" />
-                        <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}…</span>
+                        <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}â€¦</span>
                       </div>
                     );
                   }
@@ -3233,7 +3498,7 @@ function DashboardPage({
                   // Non-PDF: show label with download button
                   return (
                     <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
-                      <span className="text-base">📎</span>
+                      <span className="text-base">ðŸ“Ž</span>
                       <div className="flex-1">
                         <p className="text-sm font-semibold text-app-dark">{cached.name}</p>
                         <p className="text-xs text-app-dark/40">Aperçu non disponible pour ce format</p>
@@ -3266,7 +3531,7 @@ function DashboardPage({
                           {ctrl.enonce ? <p className="mt-1 text-xs text-app-dark/60">{ctrl.enonce}</p> : null}
                           <p className="mt-1 text-xs text-app-dark/40">Barème: {ctrl.bareme}{ctrl.date_limite ? ` | Limite: ${ctrl.date_limite}` : ""}</p>
                           {ctrl.has_fichier && (
-                            <p className="mt-1 text-xs text-app-dark/40">📎 Énoncé: {ctrl.nom_fichier_enonce}</p>
+                            <p className="mt-1 text-xs text-app-dark/40">ðŸ“Ž Énoncé: {ctrl.nom_fichier_enonce}</p>
                           )}
                         </div>
                       ))}
@@ -3276,7 +3541,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* ── CONTRÔLES ── */}
+            {/* â”€â”€ CONTRÃ”LES â”€â”€ */}
             {stageaireView === "controles" ? (
               <>
                 {detailControleId === null ? (
@@ -3326,10 +3591,10 @@ function DashboardPage({
                                 </div>
                                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                                   {submitted ? (
-                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">✓ Soumis</span>
+                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">âœ“ Soumis</span>
                                   ) : (
                                     <span className="rounded-full px-2 py-0.5 text-xs font-bold text-white" style={{ background: isOverdue ? "#ef4444" : "#f59e0b" }}>
-                                      {isOverdue ? "En retard" : "À faire"}
+                                      {isOverdue ? "En retard" : "Ã€ faire"}
                                     </span>
                                   )}
                                   {control.deadline && (
@@ -3350,7 +3615,7 @@ function DashboardPage({
                                 className="mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
                                 style={{ background: "#15173D" }}
                               >
-                                Voir le contrôle →
+                                Voir le contrôle â†’
                               </button>
                             </div>
                           );
@@ -3405,14 +3670,53 @@ function DashboardPage({
                                 </div>
                               </div>
                               {s.correction_publiee ? (
-                                <div className="rounded-lg border border-app-muted/60 bg-white p-3">
-                                  <p className="text-xs font-semibold text-app-dark/60 mb-1">
-                                    {s.correction_titre ? `Correction — ${s.correction_titre}` : "Correction officielle"}
-                                  </p>
-                                  <p className="text-sm text-app-dark/80 whitespace-pre-wrap leading-relaxed">{s.correction_publiee}</p>
+                                <div className="space-y-2">
+                                  <div className="rounded-lg border border-app-muted/60 bg-white p-3">
+                                    <p className="text-xs font-semibold text-app-dark/60 mb-1">
+                                      {s.correction_titre ? `Correction â€” ${s.correction_titre}` : "Correction officielle"}
+                                    </p>
+                                    <p className="text-sm text-app-dark/80 whitespace-pre-wrap leading-relaxed">{s.correction_publiee}</p>
+                                  </div>
+                                  {correctionFichier[s.controle_id] ? (
+                                    <div className="rounded-xl border border-app-muted bg-white overflow-hidden">
+                                      <div className="flex items-center justify-between px-4 py-2 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                                        <p className="text-xs font-bold text-white">Correction PDF â€” {correctionFichier[s.controle_id]!.name}</p>
+                                        <button type="button" onClick={() => setCorrectionFichier((prev) => ({ ...prev, [s.controle_id]: null }))} className="text-white/50 hover:text-white text-xs">âœ• Fermer</button>
+                                      </div>
+                                      <div className="p-3">
+                                        {correctionFichier[s.controle_id]!.mimeType === "application/pdf" || correctionFichier[s.controle_id]!.name.toLowerCase().endsWith(".pdf")
+                                          ? <InlinePdfViewer base64={correctionFichier[s.controle_id]!.base64} name={correctionFichier[s.controle_id]!.name} />
+                                          : (
+                                            <div className="flex items-center gap-3 p-3">
+                                              <span className="text-base">ðŸ“Ž</span>
+                                              <p className="flex-1 text-sm font-medium text-app-dark">{correctionFichier[s.controle_id]!.name}</p>
+                                              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: "#982598" }} onClick={() => triggerDownload(correctionFichier[s.controle_id]!.base64, correctionFichier[s.controle_id]!.name, correctionFichier[s.controle_id]!.mimeType)}>↓ Télécharger</button>
+                                            </div>
+                                          )
+                                        }
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={!!correctionFichierLoading[s.controle_id]}
+                                      onClick={() => void loadCorrectionFichier(s.controle_id)}
+                                      className="flex items-center gap-2 rounded-lg border border-app-muted bg-white px-3 py-2 text-xs font-semibold text-app-dark transition hover:border-app-accent hover:bg-app-soft disabled:opacity-50"
+                                    >
+                                      {correctionFichierLoading[s.controle_id] ? (
+                                        <svg className="h-4 w-4 animate-spin text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
+                                      ) : (
+                                        <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                                      )}
+                                      {correctionFichierLoading[s.controle_id] ? "Chargementâ€¦" : "Voir la correction PDF"}
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
-                                <p className="text-xs text-app-dark/35 italic">Correction non encore publiée.</p>
+                                <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2">
+                                  <svg className="h-4 w-4 shrink-0 text-orange-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                  <p className="text-xs font-semibold text-orange-600">Correction non encore publiée</p>
+                                </div>
                               )}
                               <button
                                 type="button"
@@ -3424,7 +3728,7 @@ function DashboardPage({
                                 }}
                                 className="mt-1 rounded-lg border border-app-muted px-3 py-1.5 text-xs font-semibold text-app-dark/70 transition hover:bg-app-soft"
                               >
-                                Voir le contrôle →
+                                Voir le contrôle â†’
                               </button>
                             </div>
                           ))}
@@ -3462,7 +3766,7 @@ function DashboardPage({
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={() => { setDetailControleId(null); setDetailControlePdf(null); }}
+                          onClick={() => { setDetailControleId(null); setDetailControlePdf(null); setCorrectionFichier(null); }}
                           className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-white px-3 py-2 text-xs font-semibold text-app-dark transition hover:bg-app-soft"
                         >
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
@@ -3474,10 +3778,10 @@ function DashboardPage({
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0">
                           {submitted ? (
-                            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">✓ Soumis</span>
+                            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">âœ“ Soumis</span>
                           ) : (
                             <span className="rounded-full px-2.5 py-0.5 text-xs font-bold text-white" style={{ background: isOverdue ? "#ef4444" : "#f59e0b" }}>
-                              {isOverdue ? "En retard" : "À faire"}
+                              {isOverdue ? "En retard" : "Ã€ faire"}
                             </span>
                           )}
                           {ctrl?.deadline && (
@@ -3503,7 +3807,7 @@ function DashboardPage({
                           {detailControlePdfLoading && (
                             <div className="flex items-center gap-2 py-6 justify-center text-app-dark/50">
                               <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
-                              <span className="text-sm">Chargement du fichier PDF…</span>
+                              <span className="text-sm">Chargement du fichier PDFâ€¦</span>
                             </div>
                           )}
                           {detailControlePdf && !detailControlePdfLoading && (
@@ -3513,7 +3817,7 @@ function DashboardPage({
                                 ? <InlineDocxViewer base64={detailControlePdf.base64} name={detailControlePdf.name} />
                                 : (
                                   <div className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
-                                    <span className="text-base">📎</span>
+                                    <span className="text-base">ðŸ“Ž</span>
                                     <div className="flex-1">
                                       <p className="text-sm font-semibold text-app-dark">{detailControlePdf.name}</p>
                                       <p className="text-xs text-app-dark/40">Aperçu non disponible pour ce format</p>
@@ -3567,12 +3871,52 @@ function DashboardPage({
                                 </div>
                               )}
                               {soumission.correction_publiee ? (
-                                <div className="rounded bg-app-soft p-3">
-                                  <p className="text-xs font-semibold text-app-dark/70 mb-1">{soumission.correction_titre ? `Correction — ${soumission.correction_titre}` : "Correction officielle"}</p>
-                                  <p className="text-sm text-app-dark/80 whitespace-pre-wrap">{soumission.correction_publiee}</p>
+                                <div className="space-y-2">
+                                  <div className="rounded bg-app-soft p-3">
+                                    <p className="text-xs font-semibold text-app-dark/70 mb-1">{soumission.correction_titre ? `Correction â€” ${soumission.correction_titre}` : "Correction officielle"}</p>
+                                    <p className="text-sm text-app-dark/80 whitespace-pre-wrap">{soumission.correction_publiee}</p>
+                                  </div>
+                                  {/* Correction PDF viewer */}
+                                  {correctionFichier[soumission.controle_id] ? (
+                                    <div className="rounded-xl border border-app-muted bg-white overflow-hidden">
+                                      <div className="flex items-center justify-between px-4 py-2 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                                        <p className="text-xs font-bold text-white">Correction PDF â€” {correctionFichier[soumission.controle_id]!.name}</p>
+                                        <button type="button" onClick={() => setCorrectionFichier((prev) => ({ ...prev, [soumission.controle_id]: null }))} className="text-white/50 hover:text-white text-xs">âœ• Fermer</button>
+                                      </div>
+                                      <div className="p-3">
+                                        {correctionFichier[soumission.controle_id]!.mimeType === "application/pdf" || correctionFichier[soumission.controle_id]!.name.toLowerCase().endsWith(".pdf")
+                                          ? <InlinePdfViewer base64={correctionFichier[soumission.controle_id]!.base64} name={correctionFichier[soumission.controle_id]!.name} />
+                                          : (
+                                            <div className="flex items-center gap-3 p-3">
+                                              <span className="text-base">ðŸ“Ž</span>
+                                              <p className="flex-1 text-sm font-medium text-app-dark">{correctionFichier[soumission.controle_id]!.name}</p>
+                                              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: "#982598" }} onClick={() => triggerDownload(correctionFichier[soumission.controle_id]!.base64, correctionFichier[soumission.controle_id]!.name, correctionFichier[soumission.controle_id]!.mimeType)}>↓ Télécharger</button>
+                                            </div>
+                                          )
+                                        }
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={!!correctionFichierLoading[soumission.controle_id]}
+                                      onClick={() => void loadCorrectionFichier(soumission.controle_id)}
+                                      className="flex items-center gap-2 rounded-lg border border-app-muted bg-white px-3 py-2 text-xs font-semibold text-app-dark transition hover:border-app-accent hover:bg-app-soft disabled:opacity-50"
+                                    >
+                                      {correctionFichierLoading[soumission.controle_id] ? (
+                                        <svg className="h-4 w-4 animate-spin text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
+                                      ) : (
+                                        <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                                      )}
+                                      {correctionFichierLoading[soumission.controle_id] ? "Chargementâ€¦" : "Voir la correction PDF"}
+                                    </button>
+                                  )}
                                 </div>
                               ) : (
-                                <p className="text-xs text-app-dark/40 italic">Aucune correction publiée pour ce contrôle.</p>
+                                <div className="flex items-center gap-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2">
+                                  <svg className="h-4 w-4 shrink-0 text-orange-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                                  <p className="text-xs font-semibold text-orange-600">Correction non encore publiée</p>
+                                </div>
                               )}
                             </div>
                           )}
@@ -3617,7 +3961,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* ── SUJET FIN DE STAGE ── */}
+            {/* â”€â”€ SUJET FIN DE STAGE â”€â”€ */}
             {stageaireView === "sujet" ? (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
@@ -3669,144 +4013,90 @@ function DashboardPage({
               </article>
             ) : null}
 
-            {/* ── CLASSEMENT (admin only) ── */}
-            {false ? (
-              <div className="space-y-6">
-                {!classementData ? (
-                  <div className="flex items-center justify-center py-16">
-                    <svg className="h-6 w-6 animate-spin text-app-accent" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
+            {/* â”€â”€ INSTALLATION & LOGICIELS â”€â”€ */}
+            {stageaireView === "installation_logiciels" ? (
+              <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                  <div>
+                    <h3 className="font-bold text-white">Installation & Logiciels</h3>
+                    <p className="mt-0.5 text-xs text-white/50">Fichiers partagés par vos instructeurs.</p>
                   </div>
-                ) : classementData.classes.length === 0 ? (
-                  <article className="rounded-2xl border border-app-muted bg-white p-10 shadow-sm text-center">
-                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "rgba(21,23,61,0.06)" }}>
-                      <svg className="h-7 w-7 text-app-dark/25" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                  <button type="button" onClick={() => void loadInstallFichiers()} className="flex items-center gap-1 rounded-lg border border-white/20 px-2.5 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 transition">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    Actualiser
+                  </button>
+                </div>
+                <div className="divide-y divide-app-muted/40">
+                  {installFichiers.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 py-12 text-center">
+                      <svg className="h-10 w-10 text-app-dark/15" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                      <p className="text-sm text-app-dark/40">Aucun fichier partagé pour le moment.</p>
                     </div>
-                    <p className="font-semibold text-app-dark/50">Aucune classe assignée</p>
-                    <p className="mt-1 text-xs text-app-dark/35">Le classement sera disponible une fois affecté à une classe.</p>
-                  </article>
-                ) : classementData.classes.map((cls) => (
-                  <div key={cls.classe_code} className="space-y-4">
-                    {/* Summary cards */}
-                    <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { label: "Votre rang", value: cls.my_rank != null ? `${cls.my_rank}${cls.my_rank === 1 ? "er" : "ème"}` : "—", sub: `sur ${cls.total}`, color: "#15173D", bg: "rgba(21,23,61,0.07)" },
-                        { label: "Votre moyenne", value: cls.my_moyenne != null ? `${cls.my_moyenne}/20` : "—", sub: "notes publiées", color: cls.my_moyenne != null ? (cls.my_moyenne >= 10 ? "#16a34a" : "#dc2626") : "#6b7280", bg: cls.my_moyenne != null ? (cls.my_moyenne >= 10 ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.06)") : "rgba(21,23,61,0.04)" },
-                        { label: "Classe", value: cls.classe_code, sub: cls.classe_label || cls.classe_code, color: "#982598", bg: "rgba(152,37,152,0.07)" },
-                      ].map((s) => (
-                        <div key={s.label} className="rounded-2xl border border-app-muted p-4 text-center shadow-sm" style={{ background: s.bg }}>
-                          <p className="text-2xl font-black" style={{ color: s.color }}>{s.value}</p>
-                          <p className="mt-0.5 text-xs font-semibold text-app-dark/50">{s.label}</p>
-                          <p className="text-[10px] text-app-dark/35">{s.sub}</p>
-                        </div>
-                      ))}
+                  ) : installFichiers.map((f) => (
+                    <div key={f.id} className="flex items-center gap-4 px-5 py-3">
+                      <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
+                        <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                      </div>
+                      <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white shrink-0">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        Télécharger
+                      </button>
                     </div>
+                  ))}
+                </div>
+              </article>
+            ) : null}
 
-                    {/* Leaderboard table */}
-                    <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                      <div className="px-6 py-4 border-b border-app-muted/60 flex items-center justify-between" style={{ background: "#15173D" }}>
-                        <div>
-                          <h3 className="font-bold text-white">Classement — {cls.classe_label || cls.classe_code}</h3>
-                          <p className="mt-0.5 text-xs text-white/50">{cls.total} stagiaire(s) · notes publiées uniquement</p>
-                        </div>
-                        <button type="button" onClick={() => void loadClassement()} className="flex items-center gap-1 rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 hover:bg-white/10 transition">
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                          Actualiser
+            {/* â”€â”€ FEUILLE DE RÉDACTION â”€â”€ */}
+            {stageaireView === "feuille_redaction" ? (
+              <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                  <div>
+                    <h3 className="font-bold text-white">Feuille de rédaction</h3>
+                    <p className="mt-0.5 text-xs text-white/50">Fichiers partagés par l'administration.</p>
+                  </div>
+                  <button type="button" onClick={() => void loadFeuilleRFichiers()} className="flex items-center gap-1 rounded-lg border border-white/20 px-2.5 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 transition">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    Actualiser
+                  </button>
+                </div>
+                <div className="divide-y divide-app-muted/40">
+                  {feuilleRFichiers.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3 py-12 text-center">
+                      <svg className="h-10 w-10 text-app-dark/15" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                      <p className="text-sm text-app-dark/40">Aucune feuille de rédaction disponible pour le moment.</p>
+                    </div>
+                  ) : feuilleRFichiers.map((f) => (
+                    <div key={f.id} className="flex items-center gap-4 px-5 py-3">
+                      {f.nom_fichier.toLowerCase().endsWith(".pdf") ? (
+                        <svg className="h-8 w-8 shrink-0 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/><text x="6" y="17" fontSize="5" fill="white" fontWeight="bold">PDF</text></svg>
+                      ) : (
+                        <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
+                        <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {f.nom_fichier.toLowerCase().endsWith(".pdf") && (
+                          <button type="button" onClick={() => void handleFeuilleRView(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                            Voir
+                          </button>
+                        )}
+                        <button type="button" onClick={() => void handleFeuilleRDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                          Télécharger
                         </button>
                       </div>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-app-muted/60 text-left text-xs font-semibold uppercase tracking-wide text-app-dark/40">
-                              <th className="px-5 py-3 w-14">Rang</th>
-                              <th className="px-4 py-3">Stagiaire</th>
-                              <th className="px-4 py-3 text-right">Moyenne</th>
-                              <th className="px-4 py-3 text-right">Notes</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {cls.leaderboard.map((entry, idx) => {
-                              const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
-                              const barPct = entry.moyenne != null ? (entry.moyenne / 20) * 100 : 0;
-                              return (
-                                <tr
-                                  key={`entry-${idx}`}
-                                  className="border-b border-app-muted/40 last:border-0"
-                                  style={{ background: entry.is_me ? "rgba(152,37,152,0.05)" : "transparent" }}
-                                >
-                                  <td className="px-5 py-3 text-center">
-                                    {medal ? (
-                                      <span className="text-lg leading-none">{medal}</span>
-                                    ) : (
-                                      <span className="text-sm font-bold" style={{ color: entry.rank ? "#15173D" : "#9ca3af" }}>{entry.rank ?? "—"}</span>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <div className="flex items-center gap-2">
-                                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: entry.is_me ? "#982598" : "#15173D" }}>
-                                        {entry.username[0]?.toUpperCase()}
-                                      </div>
-                                      <span className="font-medium text-app-dark">{entry.username}</span>
-                                      {entry.is_me && <span className="rounded-full bg-app-accent px-2 py-0.5 text-[10px] font-bold text-white">Vous</span>}
-                                    </div>
-                                  </td>
-                                  <td className="px-4 py-3 text-right">
-                                    {entry.moyenne != null ? (
-                                      <div className="flex flex-col items-end gap-1">
-                                        <span className="font-black text-sm" style={{ color: entry.moyenne >= 10 ? "#16a34a" : "#dc2626" }}>{entry.moyenne}/20</span>
-                                        <div className="h-1.5 w-20 rounded-full bg-app-muted overflow-hidden">
-                                          <div className="h-full rounded-full transition-all" style={{ width: `${barPct}%`, background: entry.moyenne >= 10 ? "#22c55e" : "#ef4444" }} />
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <span className="text-xs italic text-app-dark/30">Non noté</span>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-3 text-right">
-                                    <span className="rounded-full bg-app-soft px-2 py-0.5 text-xs font-semibold text-app-dark/60">{entry.evaluations_count}</span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </article>
-
-                    {/* Notes perso */}
-                    {stageaireData.notes.length > 0 && (
-                      <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-app-muted/60 flex items-center gap-3">
-                          <svg className="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /></svg>
-                          <div>
-                            <h3 className="font-bold text-app-dark">Vos notes détaillées</h3>
-                            <p className="text-xs text-app-dark/40">Moyenne : <span className="font-bold" style={{ color: (stageaireData.notes.reduce((s, n) => s + parseFloat(n.note), 0) / stageaireData.notes.length) >= 10 ? "#16a34a" : "#dc2626" }}>{(stageaireData.notes.reduce((s, n) => s + parseFloat(n.note), 0) / stageaireData.notes.length).toFixed(2)}/20</span></p>
-                          </div>
-                        </div>
-                        <div className="p-5 space-y-2">
-                          {stageaireData.notes.map((note, index) => {
-                            const val = parseFloat(note.note);
-                            return (
-                              <div key={`note-cls-${index}`} className="flex items-center gap-3 rounded-xl border border-app-muted/60 bg-app-soft/40 px-4 py-3">
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-app-dark truncate">{note.controle}</p>
-                                  {note.published_at && <p className="text-xs text-app-dark/40">{new Date(note.published_at).toLocaleDateString("fr-FR")}</p>}
-                                </div>
-                                <div className="shrink-0 flex flex-col items-end gap-1">
-                                  <span className="rounded-full px-3 py-1 text-sm font-black text-white" style={{ background: val >= 10 ? "#22c55e" : "#ef4444" }}>{note.note}/20</span>
-                                  <div className="h-1.5 w-16 rounded-full bg-app-muted overflow-hidden">
-                                    <div className="h-full rounded-full" style={{ width: `${(val / 20) * 100}%`, background: val >= 10 ? "#22c55e" : "#ef4444" }} />
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </article>
-                    )}
-                  </div>
-                ))}
-              </div>
+                    </div>
+                  ))}
+                </div>
+              </article>
             ) : null}
+
 
           </div>
         </section>
@@ -3878,7 +4168,7 @@ function DashboardPage({
           {/* Main content */}
           <div className="min-w-0 grid gap-5">
 
-            {/* ── NOTIFICATION FLASH ── */}
+            {/* â”€â”€ NOTIFICATION FLASH â”€â”€ */}
             {coordinateurData.notifications.unread_count > 0 && !coordNotifDismissed && (
               <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm animate-pulse-once">
                 <svg className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
@@ -3899,7 +4189,7 @@ function DashboardPage({
               </div>
             )}
 
-            {/* ── DASHBOARD ── */}
+            {/* â”€â”€ DASHBOARD â”€â”€ */}
             {coordinateurView === "dashboard" && (
               <>
                 {/* KPI cards */}
@@ -3929,20 +4219,20 @@ function DashboardPage({
                       <h3 className="font-bold text-app-dark">Performance globale</h3>
                       <p className="mt-0.5 text-xs text-app-dark/50">Indicateurs clés en temps réel</p>
                     </div>
-                    <button type="button" onClick={() => setCoordinateurView("reporting")} className="text-xs font-semibold text-app-accent hover:underline">Voir le détail →</button>
+                    <button type="button" onClick={() => setCoordinateurView("reporting")} className="text-xs font-semibold text-app-accent hover:underline">Voir le détail â†’</button>
                   </div>
                   <div className="grid grid-cols-3 divide-x divide-app-muted/40 p-0">
                     {[
                       {
                         label: "Taux de réussite",
-                        value: coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "—",
+                        value: coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "â€”",
                         pct: coordinateurData.monitoring.taux_reussite_global ?? 0,
                         color: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b",
-                        sub: "stagiaires ≥ 10/20",
+                        sub: "stagiaires â‰¥ 10/20",
                       },
                       {
                         label: "Note moyenne",
-                        value: coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}/20` : "—",
+                        value: coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}/20` : "â€”",
                         pct: ((coordinateurData.monitoring.avancement_moyen ?? 0) / 20) * 100,
                         color: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444",
                         sub: "moyenne générale",
@@ -3981,7 +4271,7 @@ function DashboardPage({
                       <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                       <input
                         type="text"
-                        placeholder="Rechercher une brigade…"
+                        placeholder="Rechercher une brigadeâ€¦"
                         value={brigadeSearch}
                         onChange={(e) => setBrigadeSearch(e.target.value)}
                         className="w-full rounded-lg border border-app-muted bg-white py-1.5 pl-8 pr-3 text-sm text-app-dark placeholder-app-dark/30 focus:outline-none focus:ring-1 focus:ring-app-accent"
@@ -3991,8 +4281,8 @@ function DashboardPage({
                     <div className="flex gap-1.5 flex-wrap">
                       {([
                         { key: "tous", label: "Toutes" },
-                        { key: "reussite", label: "En réussite ≥70%" },
-                        { key: "surveiller", label: "À surveiller <50%" },
+                        { key: "reussite", label: "En réussite â‰¥70%" },
+                        { key: "surveiller", label: "Ã€ surveiller <50%" },
                         { key: "sans_notes", label: "Sans notes" },
                       ] as const).map((f) => (
                         <button
@@ -4042,7 +4332,7 @@ function DashboardPage({
                                 <td className="px-4 py-3">
                                   {b.note_moyenne !== null ? (
                                     <span className="font-bold" style={{ color: b.note_moyenne >= 10 ? "#059669" : "#ef4444" }}>{b.note_moyenne}/20</span>
-                                  ) : <span className="text-app-dark/30">—</span>}
+                                  ) : <span className="text-app-dark/30">â€”</span>}
                                 </td>
                                 <td className="px-4 py-3">
                                   {b.taux_reussite !== null ? (
@@ -4052,7 +4342,7 @@ function DashboardPage({
                                       </div>
                                       <span className="font-bold text-xs" style={{ color: b.taux_reussite >= 70 ? "#059669" : b.taux_reussite >= 50 ? "#f59e0b" : "#ef4444" }}>{b.taux_reussite}%</span>
                                     </div>
-                                  ) : <span className="text-app-dark/30">—</span>}
+                                  ) : <span className="text-app-dark/30">â€”</span>}
                                 </td>
                                 <td className="px-4 py-3 text-app-dark/70">{b.soumissions_count}</td>
                               </tr>
@@ -4069,7 +4359,7 @@ function DashboardPage({
               </>
             )}
 
-            {/* ── REPORTING ── */}
+            {/* â”€â”€ REPORTING â”€â”€ */}
             {coordinateurView === "reporting" && (
               <>
                 {/* Global KPI */}
@@ -4078,9 +4368,9 @@ function DashboardPage({
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Taux de réussite global</p>
                     <div className="mt-3 flex items-end gap-2">
                       <span className="text-4xl font-black" style={{ color: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b" }}>
-                        {coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "—"}
+                        {coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "â€”"}
                       </span>
-                      <span className="mb-1 text-xs text-app-dark/40">stagiaires ≥ 10/20</span>
+                      <span className="mb-1 text-xs text-app-dark/40">stagiaires â‰¥ 10/20</span>
                     </div>
                     <div className="mt-3 h-2 w-full rounded-full bg-app-muted/40 overflow-hidden">
                       <div className="h-full rounded-full transition-all" style={{ width: `${coordinateurData.monitoring.taux_reussite_global ?? 0}%`, background: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b" }} />
@@ -4090,7 +4380,7 @@ function DashboardPage({
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Avancement moyen</p>
                     <div className="mt-3 flex items-end gap-2">
                       <span className="text-4xl font-black" style={{ color: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444" }}>
-                        {coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}` : "—"}
+                        {coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}` : "â€”"}
                       </span>
                       <span className="mb-1 text-xs text-app-dark/40">/ 20</span>
                     </div>
@@ -4116,7 +4406,7 @@ function DashboardPage({
                 <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-app-muted/60">
                     <h3 className="font-bold text-app-dark">Taux de réussite par brigade</h3>
-                    <p className="mt-0.5 text-xs text-app-dark/50">% de stagiaires avec une moyenne ≥ 10/20</p>
+                    <p className="mt-0.5 text-xs text-app-dark/50">% de stagiaires avec une moyenne â‰¥ 10/20</p>
                   </div>
                   <div className="p-5 space-y-4">
                     {coordinateurData.monitoring.brigades.length === 0 ? (
@@ -4128,7 +4418,7 @@ function DashboardPage({
                         <div key={b.brigade_code}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-semibold text-app-dark">{b.brigade_code}</span>
-                            <span className="text-sm font-bold" style={{ color }}>{b.taux_reussite !== null ? `${b.taux_reussite}%` : "—"}</span>
+                            <span className="text-sm font-bold" style={{ color }}>{b.taux_reussite !== null ? `${b.taux_reussite}%` : "â€”"}</span>
                           </div>
                           <div className="h-3 w-full rounded-full bg-app-muted/40 overflow-hidden">
                             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${taux}%`, background: color }} />
@@ -4157,7 +4447,7 @@ function DashboardPage({
                         <div key={b.brigade_code}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-semibold text-app-dark">{b.brigade_code}</span>
-                            <span className="text-sm font-bold" style={{ color }}>{b.note_moyenne !== null ? `${b.note_moyenne}/20` : "—"}</span>
+                            <span className="text-sm font-bold" style={{ color }}>{b.note_moyenne !== null ? `${b.note_moyenne}/20` : "â€”"}</span>
                           </div>
                           <div className="h-3 w-full rounded-full bg-app-muted/40 overflow-hidden">
                             <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: color }} />
@@ -4171,7 +4461,7 @@ function DashboardPage({
               </>
             )}
 
-            {/* ── EXPORT ── */}
+            {/* â”€â”€ EXPORT â”€â”€ */}
             {coordinateurView === "export" && (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                 <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
@@ -4182,7 +4472,7 @@ function DashboardPage({
                   <div className="rounded-xl border border-app-muted/60 bg-app-soft/40 p-4">
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Contenu du rapport</p>
                     <ul className="space-y-1 text-sm text-app-dark/70">
-                      {["Brigade, classes, stagiaires par brigade", "Nombre de notes publiées et stagiaires évalués", "Note moyenne sur 20 par brigade", "Taux de réussite (≥ 10/20) par brigade", "Nombre total de soumissions par brigade"].map((item) => (
+                      {["Brigade, classes, stagiaires par brigade", "Nombre de notes publiées et stagiaires évalués", "Note moyenne sur 20 par brigade", "Taux de réussite (â‰¥ 10/20) par brigade", "Nombre total de soumissions par brigade"].map((item) => (
                         <li key={item} className="flex items-center gap-2">
                           <svg className="h-3.5 w-3.5 shrink-0 text-emerald-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                           {item}
@@ -4227,7 +4517,7 @@ function DashboardPage({
                 {t("admin.navOverview")}
               </AdminNavButton>
 
-              {/* Users — collapsible */}
+              {/* Users â€” collapsible */}
               <div>
                 <button
                   className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${adminView === "users" ? "bg-app-dark text-white" : "border border-app-dark text-app-dark hover:bg-app-soft"}`}
@@ -4278,15 +4568,17 @@ function DashboardPage({
                 )}
               </div>
 
+              <AdminNavButton active={adminView === "modules"} onClick={() => { setAdminView("modules"); setAdminSelectedModule(null); setSelectedAdminUser(null); }}>
+                Modules
+              </AdminNavButton>
+
               <AdminNavButton active={adminView === "accounts"} onClick={() => { setAdminView("accounts"); setSelectedAdminUser(null); }}>
                 {t("admin.navAccounts")}
               </AdminNavButton>
               <AdminNavButton active={adminView === "bulk_csv"} onClick={() => { setAdminView("bulk_csv"); setSelectedAdminUser(null); }}>
                 Sujets fin stage
               </AdminNavButton>
-              <AdminNavButton active={adminView === "classes"} onClick={() => { setAdminView("classes"); setSelectedAdminUser(null); }}>
-                {t("admin.navClasses")}
-              </AdminNavButton>
+
               <AdminNavButton active={adminView === "references"} onClick={() => { setAdminView("references"); setSelectedAdminUser(null); }}>
                 References
               </AdminNavButton>
@@ -4299,6 +4591,9 @@ function DashboardPage({
               <AdminNavButton active={adminView === "fichiers_renseignement"} onClick={() => { setAdminView("fichiers_renseignement"); setSelectedAdminUser(null); }}>
                 Fichiers de renseignement
               </AdminNavButton>
+              <AdminNavButton active={adminView === "feuille_redaction"} onClick={() => { setAdminView("feuille_redaction"); setSelectedAdminUser(null); void loadFeuilleRFichiers(); }}>
+                Feuille de rédaction
+              </AdminNavButton>
             </div>
           </aside>
 
@@ -4306,10 +4601,10 @@ function DashboardPage({
             {adminView === "overview" ? (
               <div className="grid gap-5">
                 <PanelSection title="Gestion de la plateforme">
-                  <AdminPlatformChart platform={adminData.platform} />
+                  <AdminPlatformChart platform={{ ...adminData.platform, users_total: adminData.users.filter(u => u.role === "Stagiaire").length }} />
                 </PanelSection>
 
-                {/* ── Statistiques rapides par rôle ── */}
+                {/* â”€â”€ Statistiques rapides par rôle â”€â”€ */}
                 <PanelSection title="Statistiques rapides par rôle">
                   <AdminRoleChart
                     users={adminData.users}
@@ -4322,7 +4617,7 @@ function DashboardPage({
             {adminView === "users" && !selectedAdminUser ? (
               <PanelSection title="Utilisateurs">
 
-                {/* ── Refresh bar ── */}
+                {/* â”€â”€ Refresh bar â”€â”€ */}
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs text-app-dark/40">{adminData.users.length} compte(s) au total</p>
                   <button
@@ -4334,11 +4629,11 @@ function DashboardPage({
                     <svg className={`h-3.5 w-3.5 ${adminRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    {adminRefreshing ? "Actualisation…" : "Actualiser"}
+                    {adminRefreshing ? "Actualisationâ€¦" : "Actualiser"}
                   </button>
                 </div>
 
-                {/* ── Actions de masse ── */}
+                {/* â”€â”€ Actions de masse â”€â”€ */}
                 <div className="mt-3 rounded-xl border border-app-muted bg-app-soft px-4 py-3">
                   <p className="mb-2 text-xs font-bold uppercase tracking-wide text-app-dark/50">Actions de masse</p>
                   <div className="flex flex-wrap gap-2">
@@ -4351,7 +4646,7 @@ function DashboardPage({
                         await loadDashboard();
                       }}
                     >
-                      ✓ Activer tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
+                      âœ“ Activer tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
                     </button>
                     <button
                       type="button"
@@ -4362,7 +4657,7 @@ function DashboardPage({
                         await loadDashboard();
                       }}
                     >
-                      ✕ Désactiver tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
+                      âœ• Désactiver tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
                     </button>
                     <button
                       type="button"
@@ -4391,16 +4686,16 @@ function DashboardPage({
                   </svg>
                   <input
                     className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                    placeholder="Rechercher par username, email ou rôle…"
+                    placeholder="Rechercher par username, email ou rôleâ€¦"
                     value={adminUserSearch}
                     onChange={(e) => { setAdminUserSearch(e.target.value); setAdminUsersPage(1); }}
                   />
                   {adminUserSearch ? (
-                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => { setAdminUserSearch(""); setAdminUsersPage(1); }} type="button">✕</button>
+                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => { setAdminUserSearch(""); setAdminUsersPage(1); }} type="button">âœ•</button>
                   ) : null}
                 </div>
 
-                {/* ── Filtres avancés ── */}
+                {/* â”€â”€ Filtres avancés â”€â”€ */}
                 <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-app-muted bg-app-soft px-4 py-3">
                   <p className="text-xs font-bold uppercase tracking-wide text-app-dark/50">Filtres avancés</p>
                   {/* Status filter */}
@@ -4425,8 +4720,8 @@ function DashboardPage({
                       value={adminUserSort}
                       onChange={(e) => { setAdminUserSort(e.target.value as "az" | "za" | "recent"); setAdminUsersPage(1); }}
                     >
-                      <option value="az">A → Z</option>
-                      <option value="za">Z → A</option>
+                      <option value="az">A â†’ Z</option>
+                      <option value="za">Z â†’ A</option>
                       <option value="recent">Plus récents</option>
                     </select>
                   </div>
@@ -4483,7 +4778,7 @@ function DashboardPage({
                         <span>
                           {totalFiltered === 0
                             ? "Aucun résultat"
-                            : `Affichage ${pageStart + 1}–${Math.min(pageEnd, totalFiltered)} sur ${totalFiltered} utilisateur${totalFiltered > 1 ? "s" : ""}`}
+                            : `Affichage ${pageStart + 1}â€“${Math.min(pageEnd, totalFiltered)} sur ${totalFiltered} utilisateur${totalFiltered > 1 ? "s" : ""}`}
                         </span>
                         {adminUserSearch && totalFiltered === 0 && (
                           <span className="text-app-dark/40">Aucun résultat pour « {adminUserSearch} »</span>
@@ -4511,7 +4806,7 @@ function DashboardPage({
                                     {/* Info */}
                                     <div className="min-w-0 flex-1">
                                       <p className="truncate text-sm font-semibold text-app-dark">{u.username}</p>
-                                      <p className="truncate text-xs text-app-dark/50">{u.email || "—"}</p>
+                                      <p className="truncate text-xs text-app-dark/50">{u.email || "â€”"}</p>
                                     </div>
                                     {/* Status */}
                                     <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${u.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
@@ -4521,7 +4816,7 @@ function DashboardPage({
                                     {rps.saved && (
                                       <span className="flex items-center gap-1 rounded bg-green-50 px-2 py-0.5 font-mono text-xs text-green-800">
                                         {rps.saved}
-                                        <button className="text-green-600 hover:text-green-800" onClick={() => navigator.clipboard.writeText(rps.saved)} type="button">⎘</button>
+                                        <button className="text-green-600 hover:text-green-800" onClick={() => navigator.clipboard.writeText(rps.saved)} type="button">âŽ˜</button>
                                       </span>
                                     )}
                                     {/* Password reset inline */}
@@ -4553,7 +4848,7 @@ function DashboardPage({
                                         }}
                                         type="button"
                                       >
-                                        ✓
+                                        âœ“
                                       </button>
                                     </div>
                                     {/* Send password by email */}
@@ -4616,7 +4911,7 @@ function DashboardPage({
                         )}
                       </div>
 
-                      {/* ── Pagination ── */}
+                      {/* â”€â”€ Pagination â”€â”€ */}
                       {totalPages > 1 && (
                         <div className="mt-5 flex items-center justify-between gap-2">
                           <button
@@ -4625,7 +4920,7 @@ function DashboardPage({
                             className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft disabled:opacity-40"
                             onClick={() => setAdminUsersPage((p) => Math.max(1, p - 1))}
                           >
-                            ← Précédent
+                            â† Précédent
                           </button>
                           <div className="flex items-center gap-1">
                             {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
@@ -4646,7 +4941,7 @@ function DashboardPage({
                             className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft disabled:opacity-40"
                             onClick={() => setAdminUsersPage((p) => Math.min(totalPages, p + 1))}
                           >
-                            Suivant →
+                            Suivant â†’
                           </button>
                         </div>
                       )}
@@ -4839,7 +5134,7 @@ function DashboardPage({
                         className="text-green-600 hover:text-green-800"
                         onClick={() => setLastCreatedAccount(null)}
                       >
-                        ✕
+                        âœ•
                       </button>
                     </div>
                     <div className="grid gap-2 text-sm">
@@ -4881,19 +5176,19 @@ function DashboardPage({
                         <div>
                           <p className="font-semibold text-app-dark/60">Corps</p>
                           {referencesData.corps.map((c) => (
-                            <p key={c.id} className="font-mono text-app-dark/50">{c.id} — {c.label}</p>
+                            <p key={c.id} className="font-mono text-app-dark/50">{c.id} â€” {c.label}</p>
                           ))}
                         </div>
                         <div>
                           <p className="font-semibold text-app-dark/60">Ranks</p>
                           {referencesData.ranks.map((r) => (
-                            <p key={r.id} className="font-mono text-app-dark/50">{r.id} — {r.label} ({referencesData.corps.find((c) => c.id === r.corps_id)?.label ?? r.corps_id})</p>
+                            <p key={r.id} className="font-mono text-app-dark/50">{r.id} â€” {r.label} ({referencesData.corps.find((c) => c.id === r.corps_id)?.label ?? r.corps_id})</p>
                           ))}
                         </div>
                         <div>
                           <p className="font-semibold text-app-dark/60">Specialites</p>
                           {referencesData.specialities.map((s) => (
-                            <p key={s.id} className="font-mono text-app-dark/50">{s.id} — {s.label}</p>
+                            <p key={s.id} className="font-mono text-app-dark/50">{s.id} â€” {s.label}</p>
                           ))}
                         </div>
                       </div>
@@ -5004,12 +5299,12 @@ function DashboardPage({
                           </svg>
                           <input
                             className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                            placeholder="Rechercher un contrôle…"
+                            placeholder="Rechercher un contrôleâ€¦"
                             value={adminControlSearch}
                             onChange={(e) => setAdminControlSearch(e.target.value)}
                           />
                           {adminControlSearch ? (
-                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminControlSearch("")} type="button">✕</button>
+                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminControlSearch("")} type="button">âœ•</button>
                           ) : null}
                         </div>
                         <div className="mt-3 space-y-2">
@@ -5071,12 +5366,12 @@ function DashboardPage({
                           </svg>
                           <input
                             className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                            placeholder="Rechercher un cours…"
+                            placeholder="Rechercher un coursâ€¦"
                             value={adminCoursSearch}
                             onChange={(e) => setAdminCoursSearch(e.target.value)}
                           />
                           {adminCoursSearch ? (
-                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminCoursSearch("")} type="button">✕</button>
+                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminCoursSearch("")} type="button">âœ•</button>
                           ) : null}
                         </div>
                         <div className="mt-3 space-y-2">
@@ -5187,11 +5482,11 @@ function DashboardPage({
                         </thead>
                         <tbody>
                           {cls.leaderboard.map((entry, idx) => {
-                            const medal = entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : null;
+                            const medal = entry.rank === 1 ? "ðŸ¥‡" : entry.rank === 2 ? "ðŸ¥ˆ" : entry.rank === 3 ? "ðŸ¥‰" : null;
                             return (
                               <tr key={`admin-entry-${idx}`} className="border-b border-app-muted/40 last:border-0 hover:bg-app-soft/40 transition">
                                 <td className="px-5 py-3 text-center">
-                                  {medal ? <span className="text-lg">{medal}</span> : <span className="text-sm font-bold text-app-dark/60">{entry.rank ?? "—"}</span>}
+                                  {medal ? <span className="text-lg">{medal}</span> : <span className="text-sm font-bold text-app-dark/60">{entry.rank ?? "â€”"}</span>}
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="flex items-center gap-2">
@@ -5319,7 +5614,7 @@ function DashboardPage({
                                     </button>
                                   </div>
                                 ) : (
-                                  <span className="text-xs text-app-dark/40">—</span>
+                                  <span className="text-xs text-app-dark/40">â€”</span>
                                 )}
                               </td>
                             </tr>
@@ -5332,7 +5627,7 @@ function DashboardPage({
               </div>
             ) : null}
 
-            {/* ── Preview modal ── */}
+            {/* â”€â”€ Preview modal â”€â”€ */}
             {adminPreviewFichier && (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -5393,6 +5688,100 @@ function DashboardPage({
               </div>
             )}
 
+            {adminView === "feuille_redaction" ? (
+              <div className="grid gap-6">
+                {/* Upload form */}
+                <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
+                  <div className="flex items-center gap-3 border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                    <svg className="h-4 w-4 text-white/70" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                    <p className="font-bold text-white">Partager une feuille de rédaction</p>
+                  </div>
+                  <div className="p-5 grid gap-3">
+                    <div className="grid gap-1">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Titre (optionnel)</label>
+                      <input
+                        className="rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
+                        placeholder="Ex : Feuille de rédaction â€” Session 2026â€¦"
+                        value={feuilleRUploadTitre}
+                        onChange={(e) => setFeuilleRUploadTitre(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid gap-1">
+                      <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Fichier Word ou PDF (.doc, .docx, .pdf)</label>
+                      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-app-muted bg-app-soft px-4 py-3 transition hover:border-app-accent hover:bg-white">
+                        <svg className="h-5 w-5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                        <span className="text-sm text-app-dark/60">{feuilleRUploadFile ? feuilleRUploadFile.name : "Choisir un fichier Word ou PDFâ€¦"}</span>
+                        <input type="file" accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" className="hidden" onChange={(e) => setFeuilleRUploadFile(e.target.files?.[0] ?? null)} />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!feuilleRUploadFile || feuilleRUploading}
+                      onClick={() => void handleFeuilleRUpload()}
+                      className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
+                      style={{ background: "#15173D" }}
+                    >
+                      {feuilleRUploading ? (
+                        <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                      )}
+                      {feuilleRUploading ? "Envoi en coursâ€¦" : "Partager le fichier"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Files list */}
+                <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
+                  <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                    <p className="font-bold text-white">Fichiers partagés</p>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-white/20 px-3 py-0.5 text-xs font-bold text-white">{feuilleRFichiers.length}</span>
+                      <button type="button" onClick={() => void loadFeuilleRFichiers()} className="flex items-center gap-1 rounded-lg border border-white/20 px-2.5 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 transition">
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        Actualiser
+                      </button>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-app-muted/40">
+                    {feuilleRFichiers.length === 0 ? (
+                      <div className="flex flex-col items-center gap-3 py-10 text-center">
+                        <svg className="h-10 w-10 text-app-dark/15" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        <p className="text-sm text-app-dark/40">Aucun fichier partagé pour le moment.</p>
+                      </div>
+                    ) : feuilleRFichiers.map((f) => (
+                      <div key={f.id} className="flex items-center gap-4 px-5 py-3">
+                        {f.nom_fichier.toLowerCase().endsWith(".pdf") ? (
+                          <svg className="h-8 w-8 shrink-0 text-red-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/><text x="6" y="17" fontSize="5" fill="white" fontWeight="bold">PDF</text></svg>
+                        ) : (
+                          <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
+                          <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {f.nom_fichier.toLowerCase().endsWith(".pdf") && (
+                            <button type="button" onClick={() => void handleFeuilleRView(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100">
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                              Voir
+                            </button>
+                          )}
+                          <button type="button" onClick={() => void handleFeuilleRDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            Télécharger
+                          </button>
+                          <button type="button" onClick={() => void handleFeuilleRDelete(f.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 transition" title="Supprimer">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {adminView === "events" ? (
               <div className="grid gap-6">
                 <PanelSection title="Events audit trail" subtitle="Suivi des operations sur la plateforme.">
@@ -5443,10 +5832,152 @@ function DashboardPage({
               </div>
             ) : null}
 
+            {adminView === "modules" ? (
+              <div className="grid gap-5">
+                {/* Breadcrumb */}
+                <nav className="flex items-center gap-1.5 text-xs flex-wrap">
+                  <button type="button" onClick={() => { setAdminSelectedModule(null); setAdminSelectedMatiere(null); setAdminSelectedBrochure(null); }} className={adminSelectedModule ? "text-app-dark/50 hover:text-app-dark transition" : "font-semibold text-app-dark"}>Modules</button>
+                  {adminSelectedModule && (
+                    <>
+                      <svg className="h-3 w-3 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                      <button type="button" onClick={() => { setAdminSelectedMatiere(null); setAdminSelectedBrochure(null); }} className={adminSelectedMatiere ? "text-app-dark/50 hover:text-app-dark transition" : "font-semibold text-app-dark"}>{adminSelectedModule.nom}</button>
+                    </>
+                  )}
+                  {adminSelectedMatiere && (
+                    <>
+                      <svg className="h-3 w-3 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                      <button type="button" onClick={() => setAdminSelectedBrochure(null)} className={adminSelectedBrochure ? "text-app-dark/50 hover:text-app-dark transition" : "font-semibold text-app-dark"}>{adminSelectedMatiere.nom}</button>
+                    </>
+                  )}
+                  {adminSelectedBrochure && (
+                    <>
+                      <svg className="h-3 w-3 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                      <span className="font-semibold text-app-dark">{adminSelectedBrochure.nom}</span>
+                    </>
+                  )}
+                </nav>
+
+                {adminModulesLoading ? (
+                  <p className="text-sm text-app-dark/50">Chargementâ€¦</p>
+                ) : adminSelectedBrochure ? (
+                  /* â”€â”€ Brochure: cours list â”€â”€ */
+                  <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+                    <div className="flex items-center gap-3 flex-wrap mb-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours â€” {adminSelectedBrochure.nom}</p>
+                    </div>
+                    {adminSelectedBrochure.cours.length > 0 ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {adminSelectedBrochure.cours.map((c) => (
+                          <div key={c.id} className="flex items-start gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                              <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-sm text-app-dark leading-snug">{c.titre}</p>
+                              {c.description && <p className="mt-0.5 text-xs text-app-dark/50 line-clamp-2">{c.description}</p>}
+                              <p className="mt-1 text-xs text-app-dark/40">{c.instructeur}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-app-dark/40 italic">Aucun cours dans cette brochure.</p>
+                    )}
+                  </article>
+                ) : adminSelectedMatiere ? (
+                  /* â”€â”€ Matiere: brochures list â”€â”€ */
+                  <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures â€” {adminSelectedMatiere.nom}</p>
+                    {adminSelectedMatiere.brochures.length > 0 ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {adminSelectedMatiere.brochures.map((b) => (
+                          <button key={b.id} type="button"
+                            onClick={() => {
+                              apiFetch(`/api/stageaire/brochures/${b.id}/cours/`).then(async (r) => {
+                                if (r.ok) { const d = await r.json(); setAdminSelectedBrochure(d); }
+                              });
+                            }}
+                            className="group flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(21,23,61,0.08)" }}>
+                              <svg className="h-4 w-4 text-app-dark" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-sm text-app-dark truncate">{b.nom}</p>
+                              <p className="mt-0.5 text-xs text-app-dark/50">{b.cours_count} cours</p>
+                            </div>
+                            {b.cours_count > 0 ? (
+                              <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#15173D" }}>{b.cours_count}</span>
+                            ) : (
+                              <span className="shrink-0 rounded-full bg-app-muted/50 px-2 py-0.5 text-xs text-app-dark/40">0</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-app-dark/40 italic">Aucune brochure dans cette matière.</p>
+                    )}
+                  </article>
+                ) : adminSelectedModule ? (
+                  /* â”€â”€ Module: matieres list â”€â”€ */
+                  <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">{adminSelectedModule.nom}</p>
+                    {adminSelectedModule.matieres.length > 0 ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {adminSelectedModule.matieres.map((mat) => (
+                          <button key={mat.id} type="button"
+                            onClick={() => {
+                              apiFetch(`/api/stageaire/matieres/${mat.id}/cours/`).then(async (r) => {
+                                if (r.ok) { const d = await r.json(); setAdminSelectedMatiere({ id: d.matiere_id, nom: d.matiere_nom, module_nom: d.module_nom, brochures: d.brochures ?? [], cours: d.cours }); }
+                              });
+                            }}
+                            className="group flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                              <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-sm text-app-dark truncate">{mat.nom}</p>
+                              <p className="mt-0.5 text-xs text-app-dark/50">{mat.cours_count} cours</p>
+                            </div>
+                            <svg className="h-4 w-4 shrink-0 text-app-dark/30 transition group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-app-dark/40 italic">Aucune matière dans ce module.</p>
+                    )}
+                  </article>
+                ) : (
+                  /* â”€â”€ Modules list â”€â”€ */
+                  <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Modules de formation</p>
+                    {adminModules.length === 0 ? (
+                      <p className="text-sm text-app-dark/40 italic">Aucun module disponible.</p>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {adminModules.map((m) => (
+                          <button key={m.id} type="button" onClick={() => setAdminSelectedModule(m)}
+                            className="group flex items-center gap-4 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#15173D" }}>
+                              <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-app-dark truncate">{m.nom}</p>
+                              <p className="mt-0.5 text-xs text-app-dark/50">{m.matieres.length} matière{m.matieres.length !== 1 ? "s" : ""}</p>
+                            </div>
+                            <svg className="h-4 w-4 shrink-0 text-app-dark/30 transition group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                )}
+              </div>
+            ) : null}
+
             {adminView === "classes" ? (
               <div className="grid gap-6">
 
-                {/* ── Créer une classe ── */}
+                {/* â”€â”€ Créer une classe â”€â”€ */}
                 <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
                   <div className="flex items-center gap-3 border-b border-app-muted px-5 py-4" style={{ background: "#15173D" }}>
                     <span className="text-base font-bold text-white">Créer une classe</span>
@@ -5469,7 +6000,7 @@ function DashboardPage({
                   </form>
                 </div>
 
-                {/* ── Gestion des affectations ── */}
+                {/* â”€â”€ Gestion des affectations â”€â”€ */}
                 <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
                   <div className="flex items-center gap-3 border-b border-app-muted px-5 py-4" style={{ background: "#15173D" }}>
                     <span className="text-base font-bold text-white">Gestion des affectations</span>
@@ -5516,7 +6047,7 @@ function DashboardPage({
                     {/* Two columns: Stagiaires | Instructeurs */}
                     <div className="grid gap-4 md:grid-cols-2">
 
-                      {/* ── Stagiaires multi-select ── */}
+                      {/* â”€â”€ Stagiaires multi-select â”€â”€ */}
                       {(() => {
                         const allStags = adminData.users.filter((u) => u.role === "Stagiaire");
                         const filteredStags = allStags.filter((u) => u.username.toLowerCase().includes(stagSearch.toLowerCase()));
@@ -5548,11 +6079,11 @@ function DashboardPage({
                               </svg>
                               <input
                                 className="w-full bg-transparent text-xs outline-none placeholder:text-app-dark/30"
-                                placeholder="Rechercher stagiaire…"
+                                placeholder="Rechercher stagiaireâ€¦"
                                 value={stagSearch}
                                 onChange={(e) => setStagSearch(e.target.value)}
                               />
-                              {stagSearch && <button type="button" className="text-app-dark/30 hover:text-app-dark text-xs" onClick={() => setStagSearch("")}>✕</button>}
+                              {stagSearch && <button type="button" className="text-app-dark/30 hover:text-app-dark text-xs" onClick={() => setStagSearch("")}>âœ•</button>}
                             </div>
                             {/* List */}
                             <div className="max-h-52 overflow-y-auto bg-white divide-y divide-app-muted/30">
@@ -5594,7 +6125,7 @@ function DashboardPage({
                         );
                       })()}
 
-                      {/* ── Instructeurs multi-select ── */}
+                      {/* â”€â”€ Instructeurs multi-select â”€â”€ */}
                       {(() => {
                         const allInstrs = adminData.users.filter((u) => u.role === "Instructeur");
                         const filteredInstrs = allInstrs.filter((u) => u.username.toLowerCase().includes(instrSearch.toLowerCase()));
@@ -5626,11 +6157,11 @@ function DashboardPage({
                               </svg>
                               <input
                                 className="w-full bg-transparent text-xs outline-none placeholder:text-app-dark/30"
-                                placeholder="Rechercher instructeur…"
+                                placeholder="Rechercher instructeurâ€¦"
                                 value={instrSearch}
                                 onChange={(e) => setInstrSearch(e.target.value)}
                               />
-                              {instrSearch && <button type="button" className="text-app-dark/30 hover:text-app-dark text-xs" onClick={() => setInstrSearch("")}>✕</button>}
+                              {instrSearch && <button type="button" className="text-app-dark/30 hover:text-app-dark text-xs" onClick={() => setInstrSearch("")}>âœ•</button>}
                             </div>
                             {/* List */}
                             <div className="max-h-52 overflow-y-auto bg-white divide-y divide-app-muted/30">
@@ -5675,7 +6206,7 @@ function DashboardPage({
                   </div>
                 </div>
 
-                {/* ── Liste des classes ── */}
+                {/* â”€â”€ Liste des classes â”€â”€ */}
                 <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
                   <div className="flex items-center justify-between border-b border-app-muted px-5 py-4" style={{ background: "#15173D" }}>
                     <span className="text-base font-bold text-white">Classes créées</span>
@@ -5695,8 +6226,8 @@ function DashboardPage({
                             className="flex-1 text-left"
                             onClick={() => setSelectedClassId(c.id)}
                           >
-                            <p className="text-sm font-bold text-app-dark">{c.code} — {c.label}</p>
-                            <p className="text-xs text-app-dark/50">Brigade : {c.brigade.code}{c.brigade.label ? ` · ${c.brigade.label}` : ""}</p>
+                            <p className="text-sm font-bold text-app-dark">{c.code} â€” {c.label}</p>
+                            <p className="text-xs text-app-dark/50">Brigade : {c.brigade.code}{c.brigade.label ? ` Â· ${c.brigade.label}` : ""}</p>
                           </button>
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span className="rounded-full bg-app-soft border border-app-muted px-2 py-0.5 text-[10px] font-semibold text-app-dark/60">{c.stageaires.length} stag.</span>
@@ -5713,7 +6244,7 @@ function DashboardPage({
                                 await loadClasses();
                               }}
                             >
-                              🗑
+                              ðŸ—‘
                             </button>
                           </div>
                         </div>
@@ -5745,7 +6276,7 @@ function DashboardPage({
                                         await loadClasses();
                                       }}
                                     >
-                                      ✕
+                                      âœ•
                                     </button>
                                   </span>
                                 ))}
@@ -5778,7 +6309,7 @@ function DashboardPage({
                                         await loadClasses();
                                       }}
                                     >
-                                      ✕
+                                      âœ•
                                     </button>
                                   </span>
                                 ))}
@@ -5817,7 +6348,7 @@ function DashboardPage({
                     value={renameModal.corps_id}
                     onChange={(e) => setRenameModal((prev) => ({ ...prev, corps_id: e.target.value }))}
                   >
-                    {renameModal.target === "speciality" && <option value="">— aucun —</option>}
+                    {renameModal.target === "speciality" && <option value="">â€” aucun â€”</option>}
                     {referencesData.corps.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
                     ))}
@@ -5912,8 +6443,9 @@ function AppShell() {
     return data.access;
   };
 
-  const loadProfile = useMemo(
-    () => async (tokenOverride?: string) => {
+  /* eslint-disable react-hooks/preserve-manual-memoization */
+  const loadProfile = useCallback(
+    async (tokenOverride?: string) => {
       const token = tokenOverride ?? accessToken;
       if (!token) return;
       let response = await fetch(`${API_BASE_URL}/api/me/`, {
@@ -5938,6 +6470,7 @@ function AppShell() {
     },
     [accessToken, refreshToken, t],
   );
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   const apiFetch = async (path: string, init?: RequestInit) => {
     if (!accessToken) {
@@ -6043,6 +6576,7 @@ function AppShell() {
 
   useEffect(() => {
     if (!accessToken) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProfile();
   }, [accessToken, loadProfile]);
 
