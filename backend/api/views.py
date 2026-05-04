@@ -30,7 +30,9 @@ from .models import (
     CoursFichier,
     Evaluation,
     EventAudit,
+    FeuilleRedactionFichier,
     FichierRenseignementTemplate,
+    InstallationLogicielFichier,
     Inscription,
     Matiere,
     Module,
@@ -2223,8 +2225,15 @@ class InstructeurPublishCorrectionView(APIView):
 
         titre = (request.data.get("titre") or "").strip()
         texte = (request.data.get("texte_correction") or "").strip()
-        if not texte:
-            return Response({"detail": "texte_correction is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        fichier_bytes = None
+        nom_fichier_correction = ""
+        mime_type_correction = ""
+        uploaded_file = request.FILES.get("fichier_correction")
+        if uploaded_file:
+            fichier_bytes = uploaded_file.read()
+            nom_fichier_correction = uploaded_file.name
+            mime_type_correction = uploaded_file.content_type or "application/octet-stream"
 
         last_version = controle.corrections.order_by("-version_no").values_list("version_no", flat=True).first() or 0
         correction = ControleCorrection.objects.create(
@@ -2232,6 +2241,9 @@ class InstructeurPublishCorrectionView(APIView):
             version_no=last_version + 1,
             titre=titre,
             texte_correction=texte,
+            fichier_correction=fichier_bytes,
+            nom_fichier_correction=nom_fichier_correction,
+            mime_type_correction=mime_type_correction,
             publie_par=request.user,
             date_publication=timezone.now(),
         )
@@ -2634,4 +2646,184 @@ class StageaireControleFichierDownloadView(APIView):
             "nom_fichier": controle.nom_fichier_enonce,
             "mime_type": controle.mime_type_enonce,
             "fichier_base64": base64.b64encode(bytes(controle.fichier_enonce)).decode(),
+        })
+
+
+# ── Feuille de rédaction ──────────────────────────────────────────────────────
+
+class FeuilleRedactionFichiersListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fichiers = FeuilleRedactionFichier.objects.all().order_by("-uploaded_at")
+        return Response({
+            "fichiers": [
+                {
+                    "id": f.id,
+                    "titre": f.titre,
+                    "nom_fichier": f.nom_fichier,
+                    "uploaded_at": f.uploaded_at.isoformat(),
+                }
+                for f in fichiers
+            ]
+        })
+
+
+class FeuilleRedactionFichierDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, fichier_id):
+        f = FeuilleRedactionFichier.objects.filter(id=fichier_id).first()
+        if not f or not f.fichier:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "fichier_base64": base64.b64encode(bytes(f.fichier)).decode(),
+            "nom_fichier": f.nom_fichier,
+            "mime_type": f.mime_type,
+        })
+
+
+class AdminFeuilleRedactionUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_ADMIN:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        fichier_base64 = request.data.get("fichier_base64")
+        nom_fichier = request.data.get("nom_fichier", "fichier")
+        mime_type = request.data.get("mime_type", "application/octet-stream")
+        titre = request.data.get("titre") or nom_fichier
+
+        if not fichier_base64:
+            return Response({"detail": "fichier_base64 requis."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            fichier_bytes = base64.b64decode(fichier_base64)
+        except Exception:
+            return Response({"detail": "fichier_base64 invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        FeuilleRedactionFichier.objects.create(
+            titre=titre,
+            nom_fichier=nom_fichier,
+            mime_type=mime_type,
+            fichier=fichier_bytes,
+            uploaded_by=request.user,
+        )
+        return Response({"detail": "Fichier partagé."}, status=status.HTTP_201_CREATED)
+
+
+class AdminFeuilleRedactionDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, fichier_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_ADMIN:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        f = FeuilleRedactionFichier.objects.filter(id=fichier_id).first()
+        if not f:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        f.delete()
+        return Response({"detail": "Supprimé."})
+
+
+# ── Installation & Logiciels ──────────────────────────────────────────────────
+
+class InstallationLogicielsFichiersListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fichiers = InstallationLogicielFichier.objects.all().order_by("-uploaded_at")
+        return Response({
+            "fichiers": [
+                {
+                    "id": f.id,
+                    "titre": f.titre,
+                    "nom_fichier": f.nom_fichier,
+                    "uploaded_at": f.uploaded_at.isoformat(),
+                }
+                for f in fichiers
+            ]
+        })
+
+
+class InstallationLogicielsFichierDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, fichier_id):
+        f = InstallationLogicielFichier.objects.filter(id=fichier_id).first()
+        if not f or not f.fichier:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "fichier_base64": base64.b64encode(bytes(f.fichier)).decode(),
+            "nom_fichier": f.nom_fichier,
+            "mime_type": f.mime_type,
+        })
+
+
+class InstructeurInstallationLogicielsUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        fichier_base64 = request.data.get("fichier_base64")
+        nom_fichier = request.data.get("nom_fichier", "fichier")
+        mime_type = request.data.get("mime_type", "application/octet-stream")
+        titre = request.data.get("titre") or nom_fichier
+
+        if not fichier_base64:
+            return Response({"detail": "fichier_base64 requis."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            fichier_bytes = base64.b64decode(fichier_base64)
+        except Exception:
+            return Response({"detail": "fichier_base64 invalide."}, status=status.HTTP_400_BAD_REQUEST)
+
+        InstallationLogicielFichier.objects.create(
+            titre=titre,
+            nom_fichier=nom_fichier,
+            mime_type=mime_type,
+            fichier=fichier_bytes,
+            uploaded_by=request.user,
+        )
+        return Response({"detail": "Fichier partagé."}, status=status.HTTP_201_CREATED)
+
+
+class InstructeurInstallationLogicielsDeleteView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, fichier_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        f = InstallationLogicielFichier.objects.filter(id=fichier_id).first()
+        if not f:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        f.delete()
+        return Response({"detail": "Supprimé."})
+
+
+# ── Correction fichier (stagiaire) ────────────────────────────────────────────
+
+class StageaireCorrectionFichierView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, controle_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_STAGIAIRE:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        correction = (
+            ControleCorrection.objects
+            .filter(controle__id_controle=controle_id)
+            .order_by("-version_no")
+            .first()
+        )
+        if not correction or not correction.fichier_correction:
+            return Response({"detail": "Aucun fichier de correction."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "fichier_base64": base64.b64encode(bytes(correction.fichier_correction)).decode(),
+            "nom_fichier": correction.nom_fichier_correction or "correction.pdf",
+            "mime_type": correction.mime_type_correction or "application/pdf",
         })

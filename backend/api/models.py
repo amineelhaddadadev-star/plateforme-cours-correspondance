@@ -358,6 +358,8 @@ class ControleCorrection(models.Model):
     titre = models.CharField(max_length=255, blank=True, default="")
     texte_correction = models.TextField(blank=True, default="")
     fichier_correction = models.BinaryField(null=True, blank=True)
+    nom_fichier_correction = models.CharField(max_length=255, blank=True, default="")
+    mime_type_correction = models.CharField(max_length=100, blank=True, default="")
     date_publication = models.DateTimeField(default=timezone.now)
     publie_par = models.ForeignKey(get_user_model(), on_delete=models.PROTECT, related_name="corrections_publiees")
 
@@ -448,6 +450,32 @@ class Notification(models.Model):
     est_lue = models.BooleanField(default=False)
     date_creation = models.DateTimeField(default=timezone.now)
     date_lecture = models.DateTimeField(null=True, blank=True)
+
+
+class FeuilleRedactionFichier(models.Model):
+    id = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
+    titre = models.CharField(max_length=255, blank=True, default="")
+    nom_fichier = models.CharField(max_length=255, blank=True, default="")
+    mime_type = models.CharField(max_length=100, blank=True, default="application/octet-stream")
+    fichier = models.BinaryField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(default=timezone.now)
+    uploaded_by = models.ForeignKey(get_user_model(), on_delete=models.SET_NULL, null=True, blank=True, related_name="feuilles_redaction_uploadees")
+
+    def __str__(self):
+        return self.titre or self.nom_fichier
+
+
+class InstallationLogicielFichier(models.Model):
+    id = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
+    titre = models.CharField(max_length=255, blank=True, default="")
+    nom_fichier = models.CharField(max_length=255, blank=True, default="")
+    mime_type = models.CharField(max_length=100, blank=True, default="application/octet-stream")
+    fichier = models.BinaryField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(default=timezone.now)
+    uploaded_by = models.ForeignKey(get_user_model(), on_delete=models.SET_NULL, null=True, blank=True, related_name="installation_fichiers_uploades")
+
+    def __str__(self):
+        return self.titre or self.nom_fichier
 
 
 class EventAudit(models.Model):
