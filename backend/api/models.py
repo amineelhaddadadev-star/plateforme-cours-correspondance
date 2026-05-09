@@ -89,42 +89,6 @@ class Speciality(models.Model):
         return self.label
 
 
-class Brigade(models.Model):
-    id_brigade = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
-    code_brigade = models.CharField(max_length=50, unique=True)
-    libelle = models.CharField(max_length=255)
-    annee_formation = models.CharField(max_length=20, blank=True, default="")
-
-    def __str__(self):
-        return self.code_brigade
-
-
-class Classe(models.Model):
-    id_classe = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
-    code_classe = models.CharField(max_length=50, unique=True)
-    libelle = models.CharField(max_length=255)
-    brigade = models.ForeignKey(Brigade, on_delete=models.CASCADE, related_name="classes")
-
-    def __str__(self):
-        return self.code_classe
-
-
-class StagiaireClasse(models.Model):
-    id_stagiaire_classe = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
-    stagiaire = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name="classes_stagiaire")
-    classe = models.ForeignKey(Classe, on_delete=models.CASCADE, related_name="stagiaires")
-    date_debut = models.DateField()
-    date_fin = models.DateField(null=True, blank=True)
-
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(date_fin__isnull=True) | models.Q(date_fin__gte=models.F("date_debut")),
-                name="ck_stagiaire_classe_dates",
-            ),
-        ]
-
-
 class InstructeurProfil(models.Model):
     instructeur = models.OneToOneField(
         get_user_model(),
@@ -133,30 +97,6 @@ class InstructeurProfil(models.Model):
     )
     specialite = models.ForeignKey(Specialite, on_delete=models.PROTECT, related_name="instructeurs")
     est_civil = models.BooleanField(default=False)
-
-
-class AffectationInstructeurClasse(models.Model):
-    id_affectation = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
-    instructeur = models.ForeignKey(
-        get_user_model(),
-        on_delete=models.CASCADE,
-        related_name="classes_instructeur",
-    )
-    classe = models.ForeignKey(Classe, on_delete=models.CASCADE, related_name="instructeurs")
-    date_debut = models.DateField()
-    date_fin = models.DateField(null=True, blank=True)
-
-    class Meta:
-        constraints = [
-            models.CheckConstraint(
-                condition=models.Q(date_fin__isnull=True) | models.Q(date_fin__gte=models.F("date_debut")),
-                name="ck_affectation_classe_dates",
-            ),
-            models.UniqueConstraint(
-                fields=["instructeur", "classe", "date_debut"],
-                name="uq_instructeur_classe_debut",
-            ),
-        ]
 
 
 class Module(models.Model):
@@ -236,13 +176,6 @@ class Cours(models.Model):
     )
     brochure = models.ForeignKey(
         "Brochure",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="cours",
-    )
-    classe = models.ForeignKey(
-        "Classe",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -412,6 +345,9 @@ class SujetFinStage(models.Model):
     cree_par = models.ForeignKey(get_user_model(), on_delete=models.PROTECT, related_name="sujets_crees")
     date_creation = models.DateTimeField(default=timezone.now)
     statut = models.CharField(max_length=30, choices=STATUT_CHOICES, default=STATUT_PROPOSE)
+    fichier_pdf = models.BinaryField(null=True, blank=True)
+    nom_fichier_pdf = models.CharField(max_length=255, blank=True, default="")
+    mime_type_pdf = models.CharField(max_length=100, blank=True, default="")
 
 
 class AffectationSujetStage(models.Model):
@@ -473,6 +409,19 @@ class InstallationLogicielFichier(models.Model):
     fichier = models.BinaryField(null=True, blank=True)
     uploaded_at = models.DateTimeField(default=timezone.now)
     uploaded_by = models.ForeignKey(get_user_model(), on_delete=models.SET_NULL, null=True, blank=True, related_name="installation_fichiers_uploades")
+
+    def __str__(self):
+        return self.titre or self.nom_fichier
+
+
+class SujetFinStageFichier(models.Model):
+    id = models.CharField(max_length=50, primary_key=True, default=generate_id, editable=False)
+    titre = models.CharField(max_length=255, blank=True, default="")
+    nom_fichier = models.CharField(max_length=255, blank=True, default="")
+    mime_type = models.CharField(max_length=100, blank=True, default="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    fichier = models.BinaryField(null=True, blank=True)
+    uploaded_at = models.DateTimeField(default=timezone.now)
+    uploaded_by = models.ForeignKey(get_user_model(), on_delete=models.SET_NULL, null=True, blank=True, related_name="sujets_fichiers_uploades")
 
     def __str__(self):
         return self.titre or self.nom_fichier

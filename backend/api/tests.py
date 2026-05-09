@@ -1,7 +1,4 @@
 from api.models import (
-    AffectationInstructeurClasse,
-    Brigade,
-    Classe,
     Controle,
     ControleCorrection,
     Cours,
@@ -14,7 +11,6 @@ from api.models import (
     SoumissionControle,
     Specialite,
     Speciality,
-    StagiaireClasse,
     UserProfile,
 )
 from django.contrib.auth import get_user_model
@@ -233,13 +229,6 @@ class ApiTests(APITestCase):
         specialite = Specialite.objects.create(libelle="Maths")
         cours = Cours.objects.create(titre="Algebra", instructeur=instructeur, specialite=specialite)
         controle = Controle.objects.create(cours=cours, instructeur=instructeur, nom="Controle 1", statut=Controle.STATUT_PUBLIE)
-        brigade = Brigade.objects.create(code_brigade="B-01", libelle="Brigade 1")
-        classe = Classe.objects.create(code_classe="C-01", libelle="Classe 1", brigade=brigade)
-        AffectationInstructeurClasse.objects.create(
-            instructeur=instructeur,
-            classe=classe,
-            date_debut=timezone.now().date(),
-        )
         Notification.objects.create(
             destinataire=instructeur,
             type_notification="CONTROLE",
@@ -359,9 +348,6 @@ class ApiTests(APITestCase):
         UserProfile.objects.create(user=instructeur, role=UserProfile.ROLE_INSTRUCTEUR, matricule="I-4")
         UserProfile.objects.create(user=stageaire, role=UserProfile.ROLE_STAGIAIRE, matricule="S-4")
 
-        brigade = Brigade.objects.create(code_brigade="B-02", libelle="Brigade 2")
-        classe = Classe.objects.create(code_classe="C-02", libelle="Classe 2", brigade=brigade)
-        StagiaireClasse.objects.create(stagiaire=stageaire, classe=classe, date_debut=timezone.now().date())
         cours = Cours.objects.create(titre="Analyse", instructeur=instructeur, statut=Cours.STATUT_PUBLIE)
         Inscription.objects.create(stagiaire=stageaire, cours=cours)
         controle = Controle.objects.create(cours=cours, instructeur=instructeur, nom="Ctrl A", statut=Controle.STATUT_PUBLIE)
@@ -454,39 +440,6 @@ class ApiTests(APITestCase):
         )
         self.assertEqual(course_status_response.status_code, status.HTTP_200_OK)
 
-        create_class_response = self.client.post(
-            "/api/admin/classes/",
-            {
-                "code_classe": "CLS-900",
-                "libelle": "Classe 900",
-                "brigade_code": "BR-900",
-                "brigade_label": "Brigade 900",
-            },
-            format="json",
-        )
-        self.assertEqual(create_class_response.status_code, status.HTTP_201_CREATED)
-        class_id = create_class_response.data["id"]
-
-        stageaire_user = get_user_model().objects.create_user(username="stage-class", password="pass-1234")
-        UserProfile.objects.create(user=stageaire_user, role=UserProfile.ROLE_STAGIAIRE, matricule="S-CLS-1")
-
-        assign_stageaire_response = self.client.post(
-            f"/api/admin/classes/{class_id}/assign-stageaire/",
-            {"stageaire_id": stageaire_user.id},
-            format="json",
-        )
-        self.assertIn(assign_stageaire_response.status_code, [status.HTTP_200_OK, status.HTTP_201_CREATED])
-
-        assign_instructeur_response = self.client.post(
-            f"/api/admin/classes/{class_id}/assign-instructeur/",
-            {"instructeur_id": instructeur.id},
-            format="json",
-        )
-        self.assertIn(assign_instructeur_response.status_code, [status.HTTP_200_OK, status.HTTP_201_CREATED])
-
-        classes_response = self.client.get("/api/admin/classes/")
-        self.assertEqual(classes_response.status_code, status.HTTP_200_OK)
-        self.assertGreaterEqual(len(classes_response.data["classes"]), 1)
         events_response = self.client.get("/api/admin/events/")
         self.assertEqual(events_response.status_code, status.HTTP_200_OK)
         self.assertGreaterEqual(len(events_response.data["events"]), 1)

@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280">
+  <!--
+    Isometric stack — 3 books
+    cx=140  cy=210  W=90  D=65  H=20 per book
+    iso(x,y,z): sx = 140 + x*0.866 - y*0.866
+                sy = 210 - z  + x*0.5  + y*0.5
+    Corner radius r=11 on top faces, r=7 on outer side corners
+  -->
+  <defs>
+
+    <!-- ── Top face gradients (front corner → back, userSpaceOnUse) ── -->
+    <linearGradient id="t1" gradientUnits="userSpaceOnUse" x1="140" y1="150" x2="163" y2="223">
+      <stop offset="0%"   stop-color="#4d8060"/>
+      <stop offset="38%"  stop-color="#1C352D"/>
+      <stop offset="100%" stop-color="#0c1a14"/>
+    </linearGradient>
+    <linearGradient id="t2" gradientUnits="userSpaceOnUse" x1="140" y1="170" x2="163" y2="243">
+      <stop offset="0%"   stop-color="#fde8d8"/>
+      <stop offset="38%"  stop-color="#F5C9B0"/>
+      <stop offset="100%" stop-color="#cc7a48"/>
+    </linearGradient>
+    <linearGradient id="t3" gradientUnits="userSpaceOnUse" x1="140" y1="190" x2="163" y2="263">
+      <stop offset="0%"   stop-color="#d0e0b0"/>
+      <stop offset="38%"  stop-color="#A6B28B"/>
+      <stop offset="100%" stop-color="#627050"/>
+    </linearGradient>
+
+    <!-- ── Gloss overlay: perpendicular to TF→TR edge (inward dir -0.866,0.5) ── -->
+    <linearGradient id="gl1" gradientUnits="userSpaceOnUse" x1="140" y1="150" x2="134" y2="153">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.32"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="gl2" gradientUnits="userSpaceOnUse" x1="140" y1="170" x2="134" y2="173">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.40"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="gl3" gradientUnits="userSpaceOnUse" x1="140" y1="190" x2="134" y2="193">
+      <stop offset="0%"   stop-color="white" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- ── Spine / left face ── -->
+    <linearGradient id="s1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#1e3830"/>
+      <stop offset="100%" stop-color="#0c1814"/>
+    </linearGradient>
+    <linearGradient id="s2" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#c88858"/>
+      <stop offset="100%" stop-color="#8c5020"/>
+    </linearGradient>
+    <linearGradient id="s3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#849070"/>
+      <stop offset="100%" stop-color="#526048"/>
+    </linearGradient>
+
+    <!-- ── Pages / right face ── -->
+    <linearGradient id="pg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#F9F6F3"/>
+      <stop offset="100%" stop-color="#d4ccbf"/>
+    </linearGradient>
+
+    <!-- ── Bookmark ── -->
+    <linearGradient id="bm" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%"   stop-color="#5a0e0e"/>
+      <stop offset="50%"  stop-color="#b01818"/>
+      <stop offset="100%" stop-color="#5a0e0e"/>
+    </linearGradient>
+
+  </defs>
+
+  <!-- Ground shadow -->
+  <ellipse cx="178" cy="265" rx="90" ry="10" fill="rgba(0,0,0,0.22)"/>
+
+  <!-- ══ Ribbon lower tail (draw before books so books overlap cleanly) ══ -->
+  <polygon points="133,210 139,210 139,228 136,234 133,228" fill="url(#bm)"/>
+  <rect x="135" y="210" width="1.2" height="18" fill="rgba(255,255,255,0.30)"/>
+
+
+  <!-- ══════════════════════════════════════════════════════
+       BOOK 3  ·  Sage #A6B28B  ·  z: 0 → 20
+       TF(140,190) TR(218,235) TB(163,263) TL(84,223)
+       BF(140,210) BR(218,255) BL(84,243)
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Spine / left face (rounded outer BL corner) -->
+  <path d="M 140,190 L 84,223 L 84,236 Q 84,243 91,240 L 140,210 Z" fill="url(#s3)"/>
+  <line x1="140" y1="190" x2="140" y2="210" stroke="rgba(255,255,255,0.18)" stroke-width="1"/>
+
+  <!-- Pages / right face (rounded outer BR corner) -->
+  <path d="M 140,190 L 218,235 L 218,248 Q 218,255 211,252 L 140,210 Z" fill="url(#pg)"/>
+  <!-- page-stack lines -->
+  <line x1="140" y1="208" x2="218" y2="253" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="205" x2="218" y2="250" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="202" x2="218" y2="247" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="199" x2="218" y2="244" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="196" x2="218" y2="241" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="193" x2="218" y2="238" stroke="rgba(0,0,0,0.05)" stroke-width="0.8"/>
+  <!-- pages top edge (bright) -->
+  <line x1="140" y1="190" x2="218" y2="235" stroke="#F9F6F3" stroke-width="2"/>
+
+  <!-- Cover / top face (all 4 corners rounded) -->
+  <path d="M 131,196 Q 140,190 150,196
+           L 209,230 Q 218,235 209,241
+           L 173,258 Q 163,263 154,258
+           L 94,229  Q 84,223  94,218 Z" fill="url(#t3)"/>
+  <!-- gloss strip along TF→TR edge -->
+  <polygon points="140,190 218,235 213,238 135,193" fill="url(#gl3)"/>
+  <!-- front-edge highlight lines -->
+  <line x1="131" y1="196" x2="209" y2="230" stroke="rgba(255,255,255,0.30)" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="131" y1="196" x2="94"  y2="218" stroke="rgba(255,255,255,0.14)" stroke-width="1"   stroke-linecap="round"/>
+  <!-- bottom-edge shadow -->
+  <line x1="84"  y1="243" x2="140" y2="210" stroke="rgba(0,0,0,0.34)" stroke-width="1.2"/>
+  <line x1="218" y1="255" x2="140" y2="210" stroke="rgba(0,0,0,0.27)" stroke-width="1.2"/>
+
+
+  <!-- ══════════════════════════════════════════════════════
+       BOOK 2  ·  Peach #F5C9B0  ·  z: 20 → 40
+       TF(140,170) TR(218,215) TB(163,243) TL(84,203)
+       BF(140,190) BR(218,235) BL(84,223)
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Spine / left face -->
+  <path d="M 140,170 L 84,203 L 84,216 Q 84,223 91,220 L 140,190 Z" fill="url(#s2)"/>
+  <line x1="140" y1="170" x2="140" y2="190" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
+
+  <!-- Pages / right face -->
+  <path d="M 140,170 L 218,215 L 218,228 Q 218,235 211,232 L 140,190 Z" fill="url(#pg)"/>
+  <line x1="140" y1="188" x2="218" y2="233" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="185" x2="218" y2="230" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="182" x2="218" y2="227" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="179" x2="218" y2="224" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="176" x2="218" y2="221" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="173" x2="218" y2="218" stroke="rgba(0,0,0,0.05)" stroke-width="0.8"/>
+  <line x1="140" y1="170" x2="218" y2="215" stroke="#F9F6F3" stroke-width="2"/>
+
+  <!-- Cover / top face -->
+  <path d="M 131,176 Q 140,170 150,176
+           L 209,210 Q 218,215 209,221
+           L 173,238 Q 163,243 154,238
+           L 94,209  Q 84,203  94,198 Z" fill="url(#t2)"/>
+  <polygon points="140,170 218,215 213,218 135,173" fill="url(#gl2)"/>
+  <line x1="131" y1="176" x2="209" y2="210" stroke="rgba(255,255,255,0.38)" stroke-width="1.6" stroke-linecap="round"/>
+  <line x1="131" y1="176" x2="94"  y2="198" stroke="rgba(255,255,255,0.16)" stroke-width="1"   stroke-linecap="round"/>
+  <!-- bottom-edge shadow -->
+  <line x1="84"  y1="223" x2="140" y2="190" stroke="rgba(0,0,0,0.30)" stroke-width="1"/>
+
+
+  <!-- ══════════════════════════════════════════════════════
+       BOOK 1  ·  Dark Green #1C352D  ·  z: 40 → 60
+       TF(140,150) TR(218,195) TB(163,223) TL(84,183)
+       BF(140,170) BR(218,215) BL(84,203)
+       ══════════════════════════════════════════════════════ -->
+
+  <!-- Spine / left face -->
+  <path d="M 140,150 L 84,183 L 84,196 Q 84,203 91,200 L 140,170 Z" fill="url(#s1)"/>
+  <line x1="140" y1="150" x2="140" y2="170" stroke="rgba(255,255,255,0.30)" stroke-width="1.2"/>
+
+  <!-- Pages / right face -->
+  <path d="M 140,150 L 218,195 L 218,208 Q 218,215 211,212 L 140,170 Z" fill="url(#pg)"/>
+  <line x1="140" y1="168" x2="218" y2="213" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="165" x2="218" y2="210" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="162" x2="218" y2="207" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="159" x2="218" y2="204" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="156" x2="218" y2="201" stroke="rgba(0,0,0,0.07)" stroke-width="0.9"/>
+  <line x1="140" y1="153" x2="218" y2="198" stroke="rgba(0,0,0,0.05)" stroke-width="0.8"/>
+  <line x1="140" y1="150" x2="218" y2="195" stroke="#F9F6F3" stroke-width="2"/>
+
+  <!-- Cover / top face -->
+  <path d="M 131,156 Q 140,150 150,156
+           L 209,190 Q 218,195 209,201
+           L 173,218 Q 163,223 154,218
+           L 94,189  Q 84,183  94,178 Z" fill="url(#t1)"/>
+  <!-- gloss strip -->
+  <polygon points="140,150 218,195 213,198 135,153" fill="url(#gl1)"/>
+  <!-- highlights -->
+  <line x1="131" y1="156" x2="209" y2="190" stroke="rgba(255,255,255,0.44)" stroke-width="1.8" stroke-linecap="round"/>
+  <line x1="131" y1="156" x2="94"  y2="178" stroke="rgba(255,255,255,0.18)" stroke-width="1"   stroke-linecap="round"/>
+  <line x1="140" y1="150" x2="140" y2="170" stroke="rgba(255,255,255,0.34)" stroke-width="1.2"/>
+  <!-- bottom-edge shadow -->
+  <line x1="84"  y1="203" x2="140" y2="170" stroke="rgba(0,0,0,0.26)" stroke-width="1"/>
+  <!-- embossed title lines on dark green cover -->
+  <line x1="150" y1="160" x2="200" y2="185" stroke="rgba(255,255,255,0.42)" stroke-width="3.2" stroke-linecap="round"/>
+  <line x1="148" y1="171" x2="202" y2="196" stroke="rgba(255,255,255,0.22)" stroke-width="2"   stroke-linecap="round"/>
+  <line x1="148" y1="179" x2="198" y2="203" stroke="rgba(255,255,255,0.14)" stroke-width="1.6" stroke-linecap="round"/>
+
+
+  <!-- ══ Ribbon upper tab (drawn last, sits above everything) ══ -->
+  <polygon points="133,132 139,132 139,150 133,150" fill="url(#bm)"/>
+  <rect x="135" y="132" width="1.2" height="18" fill="rgba(255,255,255,0.30)"/>
+  <line x1="133" y1="133" x2="139" y2="133" stroke="rgba(255,255,255,0.50)" stroke-width="1.1"/>
+
+</svg>

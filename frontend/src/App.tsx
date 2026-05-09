@@ -45,20 +45,18 @@ type Role = "Instructeur" | "Stagiaire" | "Admin" | "Coordinateur";
 
 type InstructeurDashboardData = {
   role: Role;
-  classes_count: number;
-  classes: Array<{ id: string; code: string; label: string; brigade: string }>;
   cours: { total: number; published: number };
   cours_list: Array<{ id: string; title: string; status: string }>;
   controles: { total: number; published: number; pending_corrections: number };
   controles_list: Array<{ id: string; name: string; status: string; cours_title: string; deadline: string | null }>;
   pending_submissions: Array<{ soumission_id: string; controle_id: string; controle_name: string; stagiaire_id: number; submitted_at: string }>;
-  sujets_fin_stage: { total: number; active: number; list: Array<{ sujet: string; stagiaire_id: number; etat: string }> };
+  sujets_fin_stage: { total: number; active: number; list: Array<{ sujet_id: string; sujet: string; description: string; stagiaire_id: number; stagiaire_username: string; etat: string }> };
+  stagiaires_list: Array<{ id: number; username: string }>;
   notifications: { unread_count: number; latest: Array<{ id: string; title: string; message: string; type: string; created_at: string }> };
 };
 
 type StageaireDashboardData = {
   role: Role;
-  classes: Array<{ classe_code: string; classe_label: string; brigade_code: string; brigade_label: string }>;
   cours_list: Array<{ id: string; titre: string; matiere: string; description: string; instructeur: string; controles_count: number }>;
   modules_list: Array<{ id: string; nom: string; matieres: Array<{ id: string; nom: string; cours_count: number }> }>;
   controls: { available_count: number; submitted_count: number; pending_count: number };
@@ -66,30 +64,32 @@ type StageaireDashboardData = {
   submitted_control_ids: string[];
   soumissions_detail: Array<{ soumission_id: string; controle_id: string; controle_name: string; statut: string; submitted_at: string; has_fichier: boolean; note: string | null; correction_publiee: string | null; correction_titre: string | null }>;
   notes: Array<{ controle: string; note: string; published_at: string | null }>;
-  sujet_fin_stage: { titre: string; description: string; etat: string; encadrant: string; date_affectation: string } | null;
+  sujet_fin_stage: { sujet_id: string; titre: string; description: string; etat: string; encadrant: string; date_affectation: string } | null;
   notifications: { unread_count: number; latest: Array<{ id: string; title: string; message: string; type: string; created_at: string }> };
 };
 
 type CoordinateurDashboardData = {
   role: Role;
   monitoring: {
-    brigades: Array<{
-      brigade_code: string;
-      classes_count: number;
-      stagiaires_count: number;
-      avec_notes_count: number;
-      published_notes_count: number;
-      note_moyenne: number | null;
-      taux_reussite: number | null;
-      soumissions_count: number;
-    }>;
     controls_total: number;
     controls_published: number;
     notes_published: number;
+    soumissions_total: number;
     taux_reussite_global: number | null;
     avancement_moyen: number | null;
     stagiaires_total: number;
   };
+  stagiaires_detail: Array<{
+    id: number;
+    username: string;
+    soumissions_count: number;
+    notes_avg: number | null;
+    encadrant_id: number | null;
+    encadrant: string | null;
+    sujet_titre: string | null;
+  }>;
+  instructeurs_list: Array<{ id: number; username: string }>;
+  par_module: Array<{ module: string; cours_count: number; controls_count: number; notes_avg: number | null }>;
   notifications: { unread_count: number };
 };
 
@@ -111,25 +111,6 @@ type AdminDashboardData = {
   }>;
 };
 
-type ClassementEntry = {
-  rank: number | null;
-  username: string;
-  user_id: number;
-  moyenne: number | null;
-  evaluations_count: number;
-  is_me?: boolean;
-};
-type ClassementClass = {
-  classe_code: string;
-  classe_label: string;
-  my_rank?: number | null;
-  my_moyenne?: number | null;
-  total: number;
-  leaderboard: ClassementEntry[];
-};
-
-type AdminClassementData = { classes: Omit<ClassementClass, "my_rank" | "my_moyenne">[] };
-
 type SubjectData = { id: string; label: string };
 type SubjectControlData = {
   id: string;
@@ -147,15 +128,6 @@ type SubjectCourseData = {
   status: string;
   instructeur_username: string;
   date_depot: string;
-};
-
-type AdminClassData = {
-  id: string;
-  code: string;
-  label: string;
-  brigade: { code: string; label: string };
-  instructeurs: Array<{ id: number; username: string }>;
-  stageaires: Array<{ id: number; username: string }>;
 };
 
 type ReferenceCorp = { id: string; code: string; label: string };
@@ -178,6 +150,15 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000
 /** Normalize a string for accent/case-insensitive matching */
 const normStr = (s: string) =>
   s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+const isTokenExpired = (token: string): boolean => {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1])) as { exp: number };
+    return payload.exp * 1000 < Date.now();
+  } catch {
+    return true;
+  }
+};
 
 /**
  * Obligatoire brochure names from the official programme table (image).
@@ -256,9 +237,9 @@ function Layout({
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
           <Link className="flex items-center gap-2.5 text-lg font-semibold tracking-tight text-app-dark" to="/">
             <img
-              src="/logo.png"
+              src="/logo.svg"
               alt="Logo"
-              className="h-10 w-10 rounded-full object-cover shadow-sm"
+              className="h-10 w-10 object-contain"
             />
             <span>{t("nav.brand")}</span>
           </Link>
@@ -390,7 +371,7 @@ function AdminRoleChart({ users, onRoleClick }: { users: { role: string; is_acti
     <div className="mt-3" style={{ minWidth: 0 }}>
       <ResponsiveContainer width="100%" height={208}>
         <BarChart data={data} margin={{ top: 16, right: 8, left: -16, bottom: 0 }}
-          onClick={(e) => { if (e?.activeLabel) onRoleClick(e.activeLabel); }}
+          onClick={(e) => { if (e?.activeLabel) onRoleClick(String(e.activeLabel)); }}
           style={{ cursor: "pointer" }}
         >
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -451,6 +432,392 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 function EmptyState({ message }: { message: string }) {
   return <Alert severity="info" sx={{ mt: 1 }}>{message}</Alert>;
+}
+
+function CreateSujetForm({
+  stagiaires,
+  onCreated,
+  apiFetch,
+}: {
+  stagiaires: Array<{ id: number; username: string }>;
+  onCreated: () => void;
+  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+}) {
+  const [titre, setTitre] = useState("");
+  const [description, setDescription] = useState("");
+  const [stagiaireId, setStagiaireId] = useState("");
+  const [wordFile, setWordFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!titre.trim() || !stagiaireId) return;
+    setSubmitting(true);
+    setMsg(null);
+
+    let fichier_base64 = "";
+    let nom_fichier = "";
+    let mime_type = "";
+
+    if (wordFile) {
+      await new Promise<void>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          fichier_base64 = (reader.result as string).split(",")[1];
+          nom_fichier = wordFile.name;
+          mime_type = wordFile.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+          resolve();
+        };
+        reader.readAsDataURL(wordFile);
+      });
+    }
+
+    const res = await apiFetch("/api/instructeur/sujets/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titre: titre.trim(), description: description.trim(), stagiaire_id: Number(stagiaireId), fichier_base64, nom_fichier, mime_type }),
+    });
+    setSubmitting(false);
+    if (res.ok) {
+      setMsg({ text: "Sujet créé et assigné.", ok: true });
+      setTitre(""); setDescription(""); setStagiaireId(""); setWordFile(null);
+      onCreated();
+    } else {
+      const err = await res.json().catch(() => ({})) as { detail?: string };
+      setMsg({ text: err.detail ?? "Erreur lors de la création.", ok: false });
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="grid gap-4">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-app-dark/60">Titre du sujet <span className="text-red-400">*</span></label>
+          <input
+            className="w-full rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
+            placeholder="Ex : Analyse de sécurité réseau"
+            value={titre}
+            onChange={(e) => setTitre(e.target.value)}
+            required
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-app-dark/60">Stagiaire <span className="text-red-400">*</span></label>
+          <select
+            className="w-full rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
+            value={stagiaireId}
+            onChange={(e) => setStagiaireId(e.target.value)}
+            required
+          >
+            <option value="">-- Sélectionner un stagiaire --</option>
+            {stagiaires.map((s) => (
+              <option key={s.id} value={s.id}>{s.username}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-semibold text-app-dark/60">Description</label>
+        <textarea
+          className="w-full rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20 resize-none"
+          placeholder="Description du sujet (optionnel)"
+          rows={2}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-semibold text-app-dark/60">Fichier Word (optionnel)</label>
+        <div className="flex items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-app-muted bg-app-soft px-4 py-2.5 text-sm text-app-dark/60 transition hover:border-app-accent hover:text-app-accent">
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
+            </svg>
+            {wordFile ? wordFile.name : "Choisir un fichier .docx"}
+            <input
+              type="file"
+              accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={(e) => setWordFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          {wordFile && (
+            <button type="button" className="text-xs text-red-400 hover:text-red-600" onClick={() => setWordFile(null)}>Retirer</button>
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={submitting || !titre.trim() || !stagiaireId}
+          className="rounded-xl px-6 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
+          style={{ background: "#1C352D" }}
+        >
+          {submitting ? "Création…" : "Créer le sujet"}
+        </button>
+        {msg && <p className={`text-xs font-medium ${msg.ok ? "text-green-600" : "text-red-500"}`}>{msg.text}</p>}
+      </div>
+    </form>
+  );
+}
+
+function SujetCard({ sujet }: { sujet: { sujet_id: string; sujet: string; description: string; stagiaire_username: string; etat: string } }) {
+  return (
+    <div className="rounded-xl border border-app-muted bg-white p-4">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-app-dark">{sujet.sujet}</p>
+          {sujet.description && <p className="mt-0.5 text-xs text-app-dark/50 line-clamp-2">{sujet.description}</p>}
+          <div className="mt-1.5 flex items-center gap-2">
+            <span className="text-xs text-app-dark/50">Stagiaire : <strong>{sujet.stagiaire_username}</strong></span>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold text-white ${sujet.etat === "EN_COURS" ? "bg-app-accent" : sujet.etat === "TERMINE" ? "bg-green-500" : "bg-red-400"}`}>
+              {sujet.etat.replace("_", " ")}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type SujetFinStageFichierItem = { id: string; titre: string; nom_fichier: string; mime_type: string; uploaded_at: string };
+
+function SujetFinStageInstructeurPanel({
+  instructeurData,
+  apiFetch,
+  onRefresh,
+}: {
+  instructeurData: InstructeurDashboardData;
+  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  onRefresh: () => void;
+}) {
+  const [fichiers, setFichiers] = useState<SujetFinStageFichierItem[]>([]);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadTitre, setUploadTitre] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const fetchFichiers = useCallback(async () => {
+    const r = await apiFetch("/api/sujet-fin-stage/fichiers/");
+    if (r.ok) { const d: SujetFinStageFichierItem[] = await r.json(); setFichiers(d); }
+  }, [apiFetch]);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void fetchFichiers(); }, [fetchFichiers]);
+
+  const handleUpload = async () => {
+    if (!uploadFile) return;
+    setUploading(true);
+    setMsg(null);
+    const fichier_base64 = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.readAsDataURL(uploadFile);
+    });
+    const r = await apiFetch("/api/instructeur/sujet-fin-stage/upload/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titre: uploadTitre.trim(), fichier_base64, nom_fichier: uploadFile.name, mime_type: uploadFile.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }),
+    });
+    setUploading(false);
+    if (r.ok) {
+      setMsg({ text: "Fichier partagé.", ok: true });
+      setUploadFile(null);
+      setUploadTitre("");
+      void fetchFichiers();
+    } else {
+      const err = await r.json().catch(() => ({})) as { detail?: string };
+      setMsg({ text: err.detail ?? "Erreur lors du partage.", ok: false });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    const r = await apiFetch(`/api/instructeur/sujet-fin-stage/${id}/supprimer/`, { method: "DELETE" });
+    if (r.ok) { void fetchFichiers(); }
+  };
+
+  const handleDownload = async (id: string, nom: string) => {
+    const r = await apiFetch(`/api/sujet-fin-stage/fichiers/${id}/`);
+    if (!r.ok) return;
+    const d: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    const bytes = Uint8Array.from(atob(d.fichier_base64), (c) => c.charCodeAt(0));
+    const blob = new Blob([bytes], { type: d.mime_type || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = nom || d.nom_fichier; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="grid gap-6">
+      {/* ── Partager un fichier Word ── */}
+      <div className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+        <h3 className="text-base font-bold text-app-dark">Partager un document Word</h3>
+        <p className="mt-0.5 text-xs text-app-dark/50">Ce fichier sera accessible à tous les stagiaires.</p>
+        <div className="mt-4 grid gap-3">
+          <input
+            className="w-full rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent"
+            placeholder="Titre (optionnel)"
+            value={uploadTitre}
+            onChange={(e) => setUploadTitre(e.target.value)}
+          />
+          <div className="flex items-center gap-3">
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-app-muted bg-app-soft px-4 py-2.5 text-sm text-app-dark/60 transition hover:border-app-accent hover:text-app-accent">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" /></svg>
+              {uploadFile ? uploadFile.name : "Choisir un fichier .docx"}
+              <input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)} />
+            </label>
+            {uploadFile && <button type="button" className="text-xs text-red-400 hover:text-red-600" onClick={() => setUploadFile(null)}>Retirer</button>}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={!uploadFile || uploading}
+              onClick={() => void handleUpload()}
+              className="rounded-xl px-6 py-2.5 text-sm font-bold text-white disabled:opacity-40 transition hover:opacity-90"
+              style={{ background: "#1C352D" }}
+            >
+              {uploading ? "Partage…" : "Partager"}
+            </button>
+            {msg && <p className={`text-xs font-medium ${msg.ok ? "text-green-600" : "text-red-500"}`}>{msg.text}</p>}
+          </div>
+        </div>
+
+        {/* List */}
+        {fichiers.length > 0 && (
+          <div className="mt-5 grid gap-2">
+            {fichiers.map((f) => (
+              <div key={f.id} className="flex items-center justify-between rounded-xl border border-app-muted bg-app-soft/40 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-app-dark truncate">{f.titre || f.nom_fichier}</p>
+                  <p className="text-xs text-app-dark/40">{f.nom_fichier} · {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2 ml-3">
+                  <button type="button" onClick={() => void handleDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                    Télécharger
+                  </button>
+                  <button type="button" onClick={() => void handleDelete(f.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 transition" title="Supprimer">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {fichiers.length === 0 && <p className="mt-4 text-xs text-app-dark/40">Aucun document partagé pour l'instant.</p>}
+      </div>
+
+      {/* ── Créer un sujet ── */}
+      <div className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+        <h3 className="text-base font-bold text-app-dark">Assigner un sujet à un stagiaire</h3>
+        <div className="mt-4">
+          <CreateSujetForm stagiaires={instructeurData.stagiaires_list} onCreated={onRefresh} apiFetch={apiFetch} />
+        </div>
+      </div>
+
+      {/* ── Liste des sujets ── */}
+      {instructeurData.sujets_fin_stage.list.length > 0 && (
+        <div className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
+          <h3 className="text-base font-bold text-app-dark">Sujets assignés ({instructeurData.sujets_fin_stage.total})</h3>
+          <div className="mt-4 grid gap-3">
+            {instructeurData.sujets_fin_stage.list.map((s) => (
+              <SujetCard key={s.sujet_id} sujet={s} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CoordGestionStagiaires({
+  stagiaires,
+  apiFetch,
+  onRefresh,
+}: {
+  stagiaires: CoordinateurDashboardData["stagiaires_detail"];
+  apiFetch: (path: string, init?: RequestInit) => Promise<Response>;
+  onRefresh: () => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  const filtered = stagiaires.filter((s) =>
+    s.username.toLowerCase().includes(search.toLowerCase()) ||
+    (s.encadrant ?? "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  const handleUnassign = async (stagiaireId: number) => {
+    const r = await apiFetch("/api/coordinateur/assign/", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stagiaire_id: stagiaireId }),
+    });
+    if (r.ok) { onRefresh(); }
+  };
+
+  return (
+    <div className="grid gap-6">
+      {/* ── Stagiaires table ── */}
+      <div className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-app-muted/60">
+          <h3 className="font-bold text-app-dark">Liste des stagiaires ({stagiaires.length})</h3>
+          <input
+            className="rounded-xl border border-app-muted bg-app-soft px-3 py-1.5 text-sm outline-none focus:border-app-accent w-48"
+            placeholder="Rechercher…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-app-soft/50">
+                <th className="px-4 py-2.5 text-left font-semibold text-app-dark/50">Stagiaire</th>
+                <th className="px-4 py-2.5 text-center font-semibold text-app-dark/50">Soumissions</th>
+                <th className="px-4 py-2.5 text-center font-semibold text-app-dark/50">Moyenne</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-app-dark/50">Encadrant</th>
+                <th className="px-4 py-2.5 text-left font-semibold text-app-dark/50">Sujet</th>
+                <th className="px-4 py-2.5 text-center font-semibold text-app-dark/50">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-app-muted/30">
+              {filtered.map((s) => (
+                <tr key={s.id} className="hover:bg-app-soft/30 transition">
+                  <td className="px-4 py-2.5 font-medium text-app-dark">{s.username}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{s.soumissions_count}</span>
+                  </td>
+                  <td className="px-4 py-2.5 text-center">
+                    {s.notes_avg !== null
+                      ? <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.notes_avg >= 10 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>{s.notes_avg}/20</span>
+                      : <span className="text-app-dark/30">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-app-dark/70">{s.encadrant ?? <span className="italic text-app-dark/30">Non assigné</span>}</td>
+                  <td className="px-4 py-2.5 text-app-dark/70 max-w-[160px] truncate">{s.sujet_titre ?? <span className="italic text-app-dark/30">—</span>}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    {s.encadrant_id !== null && (
+                      <button
+                        type="button"
+                        onClick={() => void handleUnassign(s.id)}
+                        className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-100 transition"
+                      >
+                        Désassigner
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-app-dark/40">Aucun stagiaire trouvé.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 type ReferenceManagementSectionProps = {
@@ -610,7 +977,7 @@ function ReferenceManagementSection({
               <div key={speciality.id} className="flex items-center justify-between rounded border border-app-muted px-2 py-1">
                 <span className="text-xs">
                   {speciality.label} <span className="text-app-dark/50">({speciality.code})</span>
-                  {speciality.corps_id ? <span className="ml-1 text-app-dark/40">â€” {referencesData.corps.find((c) => c.id === speciality.corps_id)?.label ?? ""}</span> : null}
+                  {speciality.corps_id ? <span className="ml-1 text-app-dark/40">— {referencesData.corps.find((c) => c.id === speciality.corps_id)?.label ?? ""}</span> : null}
                 </span>
                 <div className="flex gap-1">
                   <button type="button" onClick={() => handleRenameSpeciality(speciality.id, speciality.label, speciality.code, speciality.corps_id ?? "")} className="rounded px-2 py-0.5 text-[11px] font-medium text-app-dark border border-app-muted hover:bg-app-soft">Éditer</button>
@@ -630,37 +997,40 @@ function HomePage() {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-10 grid gap-6">
 
-      {/* â”€â”€ Hero banner â”€â”€ */}
+      {/* ── Hero banner ── */}
       <div
         className="relative overflow-hidden rounded-2xl shadow-xl"
-        style={{ background: "linear-gradient(135deg, #0E0F29 0%, #15173D 60%, #1E1F4A 100%)" }}
+        style={{ background: "linear-gradient(135deg, #162b22 0%, #1C352D 60%, #224035 100%)" }}
       >
         {/* Decorative blobs */}
-        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full opacity-10" style={{ background: "#982598" }} />
-        <div className="pointer-events-none absolute -bottom-10 right-32 h-40 w-40 rounded-full opacity-10" style={{ background: "#982598" }} />
-        <div className="pointer-events-none absolute bottom-6 right-6 h-20 w-20 rounded-full opacity-10" style={{ background: "#982598" }} />
+        <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full opacity-15" style={{ background: "#1C352D" }} />
+        <div className="pointer-events-none absolute -bottom-10 right-32 h-40 w-40 rounded-full opacity-10" style={{ background: "#A6B28B" }} />
+        <div className="pointer-events-none absolute bottom-6 right-6 h-20 w-20 rounded-full opacity-10" style={{ background: "#1C352D" }} />
 
         <div className="relative flex flex-col gap-10 p-10 md:flex-row md:items-center md:justify-between">
 
-          {/* Left â€” text */}
+          {/* Left — text */}
           <div className="max-w-xl">
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "#982598" }}>
-              Enterprise Training Platform
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "#A6B28B" }}>
+              Plateforme de formation
             </p>
-            <h1 className="mt-3 text-4xl font-black uppercase leading-tight text-white md:text-5xl">
-              <span style={{ color: "#982598" }}>Plateforme de cours par correspondance</span>
+            <h1 className="mt-3 text-4xl font-black leading-tight text-white md:text-5xl">
+              Cours par <span style={{ color: "#A6B28B" }}>correspondance</span>
             </h1>
+            <p className="mt-3 text-sm text-white/60 leading-relaxed max-w-sm">
+              Collaboration unifiée entre Instructeurs, Stagiaires, Admins et Coordinateurs.
+            </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
-                className="rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:opacity-90"
-                style={{ background: "#982598" }}
+                className="rounded-xl px-6 py-3 text-sm font-bold shadow-lg transition hover:opacity-90"
+                style={{ background: "#A6B28B", color: "#1C352D" }}
                 to="/login"
               >
-                Se connecter â†’
+                Se connecter →
               </Link>
               <Link
-                className="rounded-xl border px-6 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10"
-                style={{ borderColor: "rgba(152,37,152,0.4)" }}
+                className="rounded-xl border px-6 py-3 text-sm font-bold transition hover:bg-white/10"
+                style={{ borderColor: "rgba(166,178,139,0.45)", color: "#A6B28B" }}
                 to="/signup"
               >
                 Créer un compte
@@ -668,23 +1038,23 @@ function HomePage() {
             </div>
           </div>
 
-          {/* Right â€” illustration */}
+          {/* Right — illustration */}
           <div className="flex shrink-0 flex-col items-center gap-4">
             {/* Fake monitor */}
             <div
               className="flex h-40 w-56 flex-col rounded-2xl border-4 shadow-2xl"
-              style={{ background: "rgba(255,255,255,0.05)", borderColor: "rgba(152,37,152,0.3)" }}
+              style={{ background: "rgba(255,255,255,0.06)", borderColor: "rgba(245,201,176,0.30)" }}
             >
               <div className="flex flex-1 flex-col justify-center gap-2 p-4">
-                <div className="h-2.5 w-full rounded-full bg-white/40" />
-                <div className="h-2.5 w-4/5 rounded-full bg-white/25" />
-                <div className="h-2.5 w-3/5 rounded-full bg-white/25" />
+                <div className="h-2.5 w-full rounded-full bg-white/35" />
+                <div className="h-2.5 w-4/5 rounded-full bg-white/20" />
+                <div className="h-2.5 w-3/5 rounded-full bg-white/20" />
                 <div className="mt-3 flex items-center gap-2">
                   <div
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ background: "#982598" }}
-                  >âœ“</div>
-                  <div className="h-2.5 flex-1 rounded-full bg-white/20" />
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold"
+                    style={{ background: "#A6B28B", color: "#1C352D" }}
+                  >✓</div>
+                  <div className="h-2.5 flex-1 rounded-full bg-white/15" />
                 </div>
               </div>
               <div className="flex justify-center pb-2">
@@ -698,8 +1068,8 @@ function HomePage() {
               {["Admin", "Instructeur", "Stagiaire", "Coordinateur"].map((r) => (
                 <span
                   key={r}
-                  className="rounded-full px-3 py-1 text-xs font-semibold text-white/80"
-                  style={{ background: "rgba(152,37,152,0.18)" }}
+                  className="rounded-full px-3 py-1 text-xs font-semibold"
+                  style={{ background: "rgba(166,178,139,0.18)", color: "#A6B28B" }}
                 >
                   {r}
                 </span>
@@ -709,7 +1079,7 @@ function HomePage() {
         </div>
       </div>
 
-      {/* â”€â”€ Feature cards â”€â”€ */}
+      {/* ── Feature cards ── */}
       <div className="grid gap-4 md:grid-cols-3">
         {[
           {
@@ -728,8 +1098,11 @@ function HomePage() {
             desc: "Tableaux de bord par rôle pour un suivi en temps réel.",
           },
         ].map((f) => (
-          <div key={f.title} className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl text-app-accent" style={{ background: "rgba(21,23,61,0.07)" }}>
+          <div key={f.title} className="rounded-2xl border border-app-muted/50 bg-white p-6 shadow-sm">
+            <div
+              className="flex h-11 w-11 items-center justify-center rounded-xl"
+              style={{ background: "rgba(28,53,45,0.08)", color: "#1C352D" }}
+            >
               {f.icon}
             </div>
             <h3 className="mt-3 text-base font-bold text-app-dark">{f.title}</h3>
@@ -950,7 +1323,6 @@ function DashboardPage({
   const [courseDescription, setCourseDescription] = useState("");
   const [courseModuleId, setCourseModuleId] = useState("");
   const [courseMatiereId, setCourseMatiereId] = useState("");
-  const [courseClasseId, setCourseClasseId] = useState("");
   const [courseFichierFile, setCourseFichierFile] = useState<File | null>(null);
   const [controlCoursId, setControlCoursId] = useState("");
   const [controlName, setControlName] = useState("");
@@ -967,11 +1339,19 @@ function DashboardPage({
   const [evalCorrection, setEvalCorrection] = useState<Record<string, string>>({});
   const [correctionText, setCorrectionText] = useState<Record<string, string>>({});
   const [correctionPdf, setCorrectionPdf] = useState<Record<string, File | null>>({});
-  type InstallFichier = { id: string; titre: string; nom_fichier: string; uploaded_at: string };
+  type InstallFichier = { id: string; titre: string; nom_fichier: string; mime_type: string; uploaded_at: string };
+  type ZipEntry = { path: string; size: number; compressed_size: number; is_dir: boolean };
+  const isZipFichier = (f: InstallFichier) =>
+    f.nom_fichier.toLowerCase().endsWith(".zip") || f.mime_type.includes("zip");
   const [installFichiers, setInstallFichiers] = useState<InstallFichier[]>([]);
   const [installUploadFile, setInstallUploadFile] = useState<File | null>(null);
   const [installUploadTitre, setInstallUploadTitre] = useState("");
   const [installUploading, setInstallUploading] = useState(false);
+  const [zipModal, setZipModal] = useState<{ fichier: InstallFichier; entries: ZipEntry[] } | null>(null);
+  const [zipLoadingId, setZipLoadingId] = useState<string | null>(null);
+  const [zipSelectedPaths, setZipSelectedPaths] = useState<Set<string>>(new Set());
+  const [zipDownloadingPath, setZipDownloadingPath] = useState<string | null>(null);
+  const [zipExtracting, setZipExtracting] = useState(false);
   const [feuilleRFichiers, setFeuilleRFichiers] = useState<InstallFichier[]>([]);
   const [feuilleRUploadFile, setFeuilleRUploadFile] = useState<File | null>(null);
   const [feuilleRUploadTitre, setFeuilleRUploadTitre] = useState("");
@@ -984,12 +1364,10 @@ function DashboardPage({
   } | null>(null);
   const [lessonModalLoading, setLessonModalLoading] = useState(false);
   const [instructeurView, setInstructeurView] = useState<"dashboard" | "cours" | "controles" | "corriger" | "sujet" | "installation_logiciels">("dashboard");
-  const [stageaireView, setStageaireView] = useState<"dashboard" | "cours" | "controles" | "sujet" | "classement" | "installation_logiciels" | "feuille_redaction">("dashboard");
-  const [coordinateurView, setCoordinateurView] = useState<"dashboard" | "reporting" | "export">("dashboard");
+  const [stageaireView, setStageaireView] = useState<"dashboard" | "cours" | "controles" | "sujet" | "installation_logiciels" | "feuille_redaction">("dashboard");
+  const [coordinateurView, setCoordinateurView] = useState<"dashboard" | "gestion" | "reporting" | "export">("dashboard");
   const [coordNotifDismissed, setCoordNotifDismissed] = useState(false);
-  const [brigadeSearch, setBrigadeSearch] = useState("");
-  const [brigadeFilter, setBrigadeFilter] = useState<"tous" | "reussite" | "surveiller" | "sans_notes">("tous");
-  const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "bulk_csv" | "subjects" | "classes" | "references" | "events" | "classement" | "fichiers_renseignement" | "modules" | "feuille_redaction">("overview");
+  const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "bulk_csv" | "subjects" | "references" | "events" | "fichiers_renseignement" | "modules" | "feuille_redaction">("overview");
   const [selectedAdminUser, setSelectedAdminUser] = useState<AdminDashboardData["users"][number] | null>(null);
   const [subjects, setSubjects] = useState<SubjectData[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
@@ -1028,7 +1406,6 @@ function DashboardPage({
   const [resetPasswordState, setResetPasswordState] = useState<Record<number, { value: string; show: boolean; saved: string }>>({});
   const [emailResetState, setEmailResetState] = useState<Record<number, "idle" | "loading" | "sent" | "no_email" | "error">>({});
 
-  const [adminClassementData, setAdminClassementData] = useState<AdminClassementData | null>(null);
   const [adminFichiersRenseignement, setAdminFichiersRenseignement] = useState<Array<{ stagiaire_id: number; stagiaire_username: string; sujet_titre: string; nom_fichier: string; etat: string; has_fichier: boolean }> | null>(null);
   const [adminFichierTemplate, setAdminFichierTemplate] = useState<{ has_template: boolean; nom_fichier: string } | null>(null);
   const [adminPreviewFichier, setAdminPreviewFichier] = useState<{ base64: string; nom_fichier: string; mime_type: string } | null>(null);
@@ -1038,13 +1415,6 @@ function DashboardPage({
   const [stagiaireFichierUploading, setStagiaireFichierUploading] = useState(false);
   const [csvFileName, setCsvFileName] = useState("");
   const [csvErrors, setCsvErrors] = useState<Array<{ line: number; error: string }>>([]);
-  const [classesData, setClassesData] = useState<AdminClassData[]>([]);
-  const [newClassForm, setNewClassForm] = useState({ libelle: "" });
-  const [selectedClassId, setSelectedClassId] = useState("");
-  const [selectedStageaireIds, setSelectedStageaireIds] = useState<number[]>([]);
-  const [selectedInstructeurIds, setSelectedInstructeurIds] = useState<number[]>([]);
-  const [stagSearch, setStagSearch] = useState("");
-  const [instrSearch, setInstrSearch] = useState("");
   const [referencesData, setReferencesData] = useState<{
     corps: ReferenceCorp[];
     ranks: ReferenceRank[];
@@ -1079,6 +1449,21 @@ function DashboardPage({
   }, [lessonModal, lessonModalLoading]);
 
   useEffect(() => {
+    if (!zipModal) return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setZipModal(null); };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [zipModal]);
+
+  useEffect(() => {
+    if (!zipModal) {
+      setZipSelectedPaths(new Set());
+      setZipDownloadingPath(null);
+      setZipExtracting(false);
+    }
+  }, [zipModal]);
+
+  useEffect(() => {
     if (!user) return;
     if (user.role === "Admin") {
       let suffix = t("titles.adminOverview");
@@ -1092,7 +1477,6 @@ function DashboardPage({
               ? t("titles.adminSubjectsCourses")
               : t("titles.adminSubjects");
       }
-      if (adminView === "classes") suffix = t("titles.adminClasses");
       if (adminView === "references") {
         suffix = referenceTab === "corps" ? "References - Corps" : referenceTab === "ranks" ? "References - Ranks" : "References - Specialities";
       }
@@ -1161,10 +1545,11 @@ function DashboardPage({
   useEffect(() => {
     if (!user) return;
     void loadDashboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
   // Silently refresh admin data (no full-page spinner) when the admin navigates
-  // to a view that lists users â€” ensures they see accounts created by others.
+  // to a view that lists users — ensures they see accounts created by others.
   const [adminRefreshing, setAdminRefreshing] = useState(false);
   const reloadAdminData = async () => {
     if (!user || user.role !== "Admin") return;
@@ -1182,11 +1567,8 @@ function DashboardPage({
 
   useEffect(() => {
     if (!user || user.role !== "Admin") return;
-    if (adminView === "users" || adminView === "accounts" || adminView === "bulk_csv" || adminView === "classes") {
+    if (adminView === "users" || adminView === "accounts" || adminView === "bulk_csv") {
       void reloadAdminData();
-    }
-    if (adminView === "classement") {
-      void loadAdminClassement();
     }
     if (adminView === "fichiers_renseignement") {
       void loadAdminFichiersRenseignement();
@@ -1199,13 +1581,9 @@ function DashboardPage({
         setAdminModulesLoading(false);
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminView]);
 
-
-  const loadAdminClassement = async () => {
-    const r = await apiFetch("/api/admin/classement/");
-    if (r.ok) { const d: AdminClassementData = await r.json(); setAdminClassementData(d); }
-  };
 
   const loadAdminFichiersRenseignement = async () => {
     const r = await apiFetch("/api/admin/fichiers-renseignement/");
@@ -1280,7 +1658,7 @@ function DashboardPage({
     const response = await apiFetch("/api/instructeur/cours/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ titre: courseTitle, description: courseDescription, module_id: courseModuleId || undefined, matiere_id: courseMatiereId || undefined, classe_id: courseClasseId || undefined, publier: true }),
+      body: JSON.stringify({ titre: courseTitle, description: courseDescription, module_id: courseModuleId || undefined, matiere_id: courseMatiereId || undefined, publier: true }),
     });
     if (!response.ok) return;
     const created: { id: string } = await response.json();
@@ -1295,7 +1673,6 @@ function DashboardPage({
     const withFile = courseFichierFile ? ` + fichier « ${courseFichierFile.name} »` : "";
     setCourseTitle("");
     setCourseDescription("");
-    setCourseClasseId("");
     setCourseFichierFile(null);
     setActionMessage(`Cours « ${courseTitle} » publié${withFile}.`);
     await loadDashboard();
@@ -1463,16 +1840,6 @@ function DashboardPage({
     }
   };
 
-  const loadClasses = async () => {
-    const response = await apiFetch("/api/admin/classes/");
-    if (!response.ok) return;
-    const data: { classes: AdminClassData[] } = await response.json();
-    setClassesData(data.classes);
-    if (!selectedClassId && data.classes.length > 0) {
-      setSelectedClassId(data.classes[0].id);
-    }
-  };
-
   const loadAdminReferences = async () => {
     const response = await apiFetch("/api/admin/references/");
     if (!response.ok) return;
@@ -1520,54 +1887,6 @@ function DashboardPage({
     }
   };
 
-  const handleCreateClass = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const response = await apiFetch("/api/admin/classes/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newClassForm),
-    });
-    if (response.ok) {
-      setActionMessage(`Classe « ${newClassForm.libelle} » créée.`);
-      setNewClassForm({ libelle: "" });
-      await loadClasses();
-    }
-  };
-
-  const handleAssignStageaireToClass = async () => {
-    if (!selectedClassId || selectedStageaireIds.length === 0) return;
-    await Promise.all(
-      selectedStageaireIds.map((id) =>
-        apiFetch(`/api/admin/classes/${selectedClassId}/assign-stageaire/`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ stageaire_id: id }),
-        })
-      )
-    );
-    const cls = classesData.find((c) => c.id === selectedClassId);
-    setActionMessage(`${selectedStageaireIds.length} stagiaire(s) affecté(s) à la classe « ${cls?.code ?? selectedClassId} ».`);
-    setSelectedStageaireIds([]);
-    await loadClasses();
-  };
-
-  const handleAssignInstructeurToClass = async () => {
-    if (!selectedClassId || selectedInstructeurIds.length === 0) return;
-    await Promise.all(
-      selectedInstructeurIds.map((id) =>
-        apiFetch(`/api/admin/classes/${selectedClassId}/assign-instructeur/`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ instructeur_id: id }),
-        })
-      )
-    );
-    const cls = classesData.find((c) => c.id === selectedClassId);
-    setActionMessage(`${selectedInstructeurIds.length} instructeur(s) affecté(s) à la classe « ${cls?.code ?? selectedClassId} ».`);
-    setSelectedInstructeurIds([]);
-    await loadClasses();
-  };
-
   const handleUpdateControlStatus = async (controlId: string, statusValue: string) => {
     const response = await apiFetch(`/api/admin/controls/${controlId}/status/`, {
       method: "POST",
@@ -1595,7 +1914,7 @@ function DashboardPage({
   };
 
   const handleExportCSV = async () => {
-    const response = await apiFetch("/api/coordinateur/report/export/?format=csv");
+    const response = await apiFetch("/api/coordinateur/report/export/?fmt=csv");
     if (!response.ok) return;
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -1609,7 +1928,7 @@ function DashboardPage({
   };
 
   const handleExportXLSX = async () => {
-    const response = await apiFetch("/api/coordinateur/report/export/?format=xlsx");
+    const response = await apiFetch("/api/coordinateur/report/export/?fmt=xlsx");
     if (!response.ok) return;
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -1775,7 +2094,7 @@ function DashboardPage({
       await reloadAdminData();
     } else if (result.errors?.length) {
       setCsvErrors(result.errors as Array<{ line: number; error: string }>);
-      setActionMessage(`Import echoue â€” ${result.error_count ?? result.errors.length} erreur(s). Voir details ci-dessous.`);
+      setActionMessage(`Import echoue — ${result.error_count ?? result.errors.length} erreur(s). Voir details ci-dessous.`);
     } else {
       setCsvErrors([]);
       setActionMessage(result.detail ?? "Import echoue.");
@@ -1864,6 +2183,41 @@ function DashboardPage({
     triggerDownload(d.fichier_base64, d.nom_fichier || nom, d.mime_type);
   };
 
+  const handleOpenZipModal = async (fichier: InstallFichier) => {
+    setZipLoadingId(fichier.id);
+    const r = await apiFetch(`/api/installation-logiciels/fichiers/${fichier.id}/zip-contents/`);
+    setZipLoadingId(null);
+    if (!r.ok) { setActionMessage("Impossible de lire le contenu du ZIP."); return; }
+    const d: { entries: ZipEntry[] } = await r.json();
+    setZipSelectedPaths(new Set(d.entries.filter(e => !e.is_dir).map(e => e.path)));
+    setZipModal({ fichier, entries: d.entries });
+  };
+
+  const handleZipEntryDownload = async (fichier: InstallFichier, entryPath: string) => {
+    setZipDownloadingPath(entryPath);
+    const r = await apiFetch(
+      `/api/installation-logiciels/fichiers/${fichier.id}/zip-entry/?path=${encodeURIComponent(entryPath)}`
+    );
+    setZipDownloadingPath(null);
+    if (!r.ok) { setActionMessage("Impossible de télécharger ce fichier."); return; }
+    const d: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(d.fichier_base64, d.nom_fichier, d.mime_type);
+  };
+
+  const handleZipExtract = async (fichier: InstallFichier) => {
+    if (zipSelectedPaths.size === 0) { setActionMessage("Aucun fichier sélectionné."); return; }
+    setZipExtracting(true);
+    const r = await apiFetch(`/api/installation-logiciels/fichiers/${fichier.id}/zip-extract/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: Array.from(zipSelectedPaths) }),
+    });
+    setZipExtracting(false);
+    if (!r.ok) { setActionMessage("Erreur lors de la création du ZIP de sélection."); return; }
+    const d: { fichier_base64: string; nom_fichier: string; mime_type: string } = await r.json();
+    triggerDownload(d.fichier_base64, d.nom_fichier, d.mime_type);
+  };
+
   const loadFeuilleRFichiers = async () => {
     const r = await apiFetch("/api/feuille-redaction/fichiers/");
     if (r.ok) { const d: { fichiers: InstallFichier[] } = await r.json(); setFeuilleRFichiers(d.fichiers); }
@@ -1922,11 +2276,11 @@ function DashboardPage({
       if (!user) return;
       if (user.role === "Admin") {
         void loadSubjects();
-        void loadClasses();
       }
       if (user.role === "Admin") {
         void loadAdminReferences();
       }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.role]);
 
   useEffect(() => {
@@ -1934,6 +2288,7 @@ function DashboardPage({
     if (user.role === "Admin" && adminView === "events") {
       void loadAdminEvents();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, adminView]);
 
   useEffect(() => {
@@ -1941,6 +2296,7 @@ function DashboardPage({
     if (user.role === "Admin" && adminView === "subjects" && subjectTab === "controls") {
       void loadSubjectControls(selectedSubjectId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, adminView, subjectTab, selectedSubjectId]);
 
   useEffect(() => {
@@ -1948,6 +2304,7 @@ function DashboardPage({
     if (user.role === "Admin" && adminView === "subjects" && subjectTab === "courses") {
       void loadSubjectCourses(selectedSubjectId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role, adminView, subjectTab, selectedSubjectId]);
 
   useEffect(() => {
@@ -2017,7 +2374,7 @@ function DashboardPage({
         />
       ) : null}
 
-      {/* Lesson modal â€” centered overlay */}
+      {/* Lesson modal — centered overlay */}
       {(lessonModal || lessonModalLoading) ? (
         <div
           className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-app-dark/60 px-4"
@@ -2028,7 +2385,7 @@ function DashboardPage({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between gap-4 rounded-t-2xl px-6 py-4" style={{ background: "#15173D" }}>
+            <div className="flex items-center justify-between gap-4 rounded-t-2xl px-6 py-4" style={{ background: "#1C352D" }}>
               <div className="min-w-0">
                 {lessonModal ? (
                   <>
@@ -2038,7 +2395,7 @@ function DashboardPage({
                     ) : null}
                   </>
                 ) : (
-                  <p className="text-sm text-white/70">Chargementâ€¦</p>
+                  <p className="text-sm text-white/70">Chargement…</p>
                 )}
               </div>
               <button
@@ -2047,7 +2404,7 @@ function DashboardPage({
                 className="shrink-0 rounded-lg px-2 py-1 text-white/70 transition hover:bg-white/10 hover:text-white"
                 aria-label="Fermer"
               >
-                âœ•
+                ✕
               </button>
             </div>
 
@@ -2093,7 +2450,7 @@ function DashboardPage({
                         return (
                           <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
                             <div className="skeleton h-5 w-5 rounded" />
-                            <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}â€¦</span>
+                            <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}…</span>
                           </div>
                         );
                       }
@@ -2116,7 +2473,7 @@ function DashboardPage({
                           <button
                             type="button"
                             className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
-                            style={{ background: "#982598" }}
+                            style={{ background: "#1C352D" }}
                             onClick={() => triggerDownload(cached.base64, cached.name, cached.mimeType)}
                           >
                             ↓ Télécharger
@@ -2132,10 +2489,77 @@ function DashboardPage({
         </div>
       ) : null}
 
+      {zipModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-app-dark/60 px-4" onClick={() => setZipModal(null)}>
+          <div className="relative flex w-full max-w-3xl max-h-[90vh] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between gap-4 rounded-t-2xl px-6 py-4" style={{ background: "#1C352D" }}>
+              <div className="min-w-0">
+                <p className="truncate text-lg font-bold text-white">{zipModal.fichier.titre || zipModal.fichier.nom_fichier}</p>
+                <p className="mt-0.5 text-xs text-white/60">{zipModal.fichier.nom_fichier}</p>
+              </div>
+              <button type="button" onClick={() => setZipModal(null)} className="shrink-0 rounded-lg px-2 py-1 text-white/70 transition hover:bg-white/10 hover:text-white" aria-label="Fermer">✕</button>
+            </div>
+            {/* Toolbar */}
+            <div className="flex items-center gap-3 border-b border-app-muted px-5 py-3 bg-app-soft">
+              <button type="button" onClick={() => setZipSelectedPaths(new Set(zipModal.entries.filter(e => !e.is_dir).map(e => e.path)))} className="rounded-lg border border-app-muted bg-white px-3 py-1 text-xs font-semibold text-app-dark hover:bg-app-soft transition">Sélectionner tout</button>
+              <button type="button" onClick={() => setZipSelectedPaths(new Set())} className="rounded-lg border border-app-muted bg-white px-3 py-1 text-xs font-semibold text-app-dark hover:bg-app-soft transition">Désélectionner tout</button>
+              <span className="ml-auto rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-bold text-blue-700">{zipSelectedPaths.size} fichier{zipSelectedPaths.size !== 1 ? "s" : ""} sélectionné{zipSelectedPaths.size !== 1 ? "s" : ""}</span>
+            </div>
+            {/* File tree */}
+            <div className="flex-1 overflow-y-auto divide-y divide-app-muted/30">
+              {zipModal.entries.length === 0 ? (
+                <div className="py-10 text-center text-sm text-app-dark/40">Archive vide.</div>
+              ) : zipModal.entries.map((entry) => {
+                const depth = entry.path.split("/").filter(Boolean).length - 1;
+                const displayName = entry.path.split("/").filter(Boolean).pop() ?? entry.path;
+                const sizeKB = entry.is_dir ? null : (entry.size / 1024).toFixed(1);
+                if (entry.is_dir) {
+                  return (
+                    <div key={entry.path} className="flex items-center gap-2 bg-app-soft/40 py-2.5" style={{ paddingLeft: `${20 + depth * 16}px`, paddingRight: "20px" }}>
+                      <svg className="h-4 w-4 shrink-0 text-yellow-500" fill="currentColor" viewBox="0 0 24 24"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                      <span className="text-xs font-semibold text-app-dark/60 uppercase tracking-wide">{displayName}</span>
+                    </div>
+                  );
+                }
+                return (
+                  <div key={entry.path} className="flex items-center gap-3 py-2.5 hover:bg-app-soft/60 transition" style={{ paddingLeft: `${20 + depth * 16}px`, paddingRight: "20px" }}>
+                    <input type="checkbox" checked={zipSelectedPaths.has(entry.path)} onChange={(e) => setZipSelectedPaths((prev) => { const next = new Set(prev); if (e.target.checked) next.add(entry.path); else next.delete(entry.path); return next; })} className="h-3.5 w-3.5 rounded accent-blue-600" />
+                    <svg className="h-4 w-4 shrink-0 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <span className="flex-1 min-w-0 text-sm text-app-dark truncate">{displayName}</span>
+                    {sizeKB !== null && <span className="text-xs text-app-dark/40 shrink-0">{sizeKB} Ko</span>}
+                    <button type="button" disabled={zipDownloadingPath === entry.path} onClick={() => void handleZipEntryDownload(zipModal.fichier, entry.path)} className="shrink-0 flex items-center gap-1 rounded-lg border border-app-muted bg-app-soft px-2.5 py-1 text-xs font-semibold text-app-dark hover:bg-white transition disabled:opacity-40" title="Télécharger ce fichier">
+                      {zipDownloadingPath === entry.path ? (
+                        <svg className="h-3 w-3 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                      ) : (
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                      )}
+                      ↓
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Footer */}
+            <div className="flex items-center justify-between border-t border-app-muted px-5 py-3">
+              <p className="text-xs text-app-dark/50">{zipModal.entries.filter(e => !e.is_dir).length} fichier(s) dans l'archive</p>
+              <button type="button" disabled={zipSelectedPaths.size === 0 || zipExtracting} onClick={() => void handleZipExtract(zipModal.fichier)} className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40" style={{ background: "#1C352D" }}>
+                {zipExtracting ? (
+                  <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                ) : (
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                )}
+                {zipExtracting ? "Préparation…" : `Télécharger la sélection (${zipSelectedPaths.size} fichier${zipSelectedPaths.size !== 1 ? "s" : ""})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {toastState ? (
         <div className={`fixed right-4 top-20 z-40 max-w-md rounded-lg px-4 py-3 text-sm shadow-lg ${toastState.kind === "success" ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"} ${toastState.closing ? "toast-exit" : `toast-enter ${toastState.kind === "error" ? "shake-error" : ""}`}`}>
           <span className={toastState.kind === "success" ? "checkmark-pop font-semibold" : "font-semibold"}>
-            {toastState.kind === "success" ? "âœ“ " : "âš  "}
+            {toastState.kind === "success" ? "✓ " : "⚠ "}
           </span>
           {toastState.message}
         </div>
@@ -2178,7 +2602,7 @@ function DashboardPage({
                 <div className="flex items-center gap-4">
                   <div
                     className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-xl font-bold text-white"
-                    style={{ background: "#15173D" }}
+                    style={{ background: "#1C352D" }}
                   >
                     {user?.username?.[0]?.toUpperCase() ?? "?"}
                   </div>
@@ -2196,26 +2620,22 @@ function DashboardPage({
                 <div className="mt-4 grid gap-2 md:grid-cols-3 border-t border-app-muted/60 pt-4">
                   <div>
                     <p className="text-xs uppercase tracking-wide text-app-dark/50">Matricule</p>
-                    <p className="mt-0.5 text-sm font-semibold">{user?.matricule || "â€”"}</p>
+                    <p className="mt-0.5 text-sm font-semibold">{user?.matricule || "—"}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-app-dark/50">Corps</p>
-                    <p className="mt-0.5 text-sm font-semibold">{user?.corps?.label ?? (user?.est_civil ? "Civil" : "â€”")}</p>
+                    <p className="mt-0.5 text-sm font-semibold">{user?.corps?.label ?? (user?.est_civil ? "Civil" : "—")}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-app-dark/50">Email</p>
-                    <p className="mt-0.5 text-sm font-semibold truncate">{user?.email || "â€”"}</p>
+                    <p className="mt-0.5 text-sm font-semibold truncate">{user?.email || "—"}</p>
                   </div>
                 </div>
               </article>
 
               <article className="card-hover rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-semibold">Affectations et activité</h3>
-                <div className="mt-3 grid gap-2 md:grid-cols-3">
-                  <div className="rounded-lg border border-app-muted/70 bg-app-soft px-3 py-2">
-                    <p className="text-xs uppercase tracking-wide text-app-dark/60">Classes</p>
-                    <p className="mt-1 text-xl font-semibold">{instructeurData.classes_count}</p>
-                  </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
                   <div className="rounded-lg border border-app-muted/70 bg-app-soft px-3 py-2">
                     <p className="text-xs uppercase tracking-wide text-app-dark/60">Cours publiés</p>
                     <p className="mt-1 text-xl font-semibold">{instructeurData.cours.published} <span className="text-sm font-normal text-app-dark/50">/ {instructeurData.cours.total}</span></p>
@@ -2224,12 +2644,6 @@ function DashboardPage({
                     <p className="text-xs uppercase tracking-wide text-app-dark/60">Ã€ corriger</p>
                     <p className="mt-1 text-xl font-semibold text-app-accent">{instructeurData.controles.pending_corrections}</p>
                   </div>
-                </div>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {instructeurData.classes.map((c) => (
-                    <span className="rounded bg-app-soft px-2 py-1 text-xs" key={c.code}>{c.code} / {c.brigade}</span>
-                  ))}
-                  {instructeurData.classes.length === 0 ? <EmptyState message="Aucune classe assignee." /> : null}
                 </div>
                 <p className="mt-4 text-sm text-app-dark/60">Notifications non lues: <span className="font-semibold text-app-dark">{instructeurData.notifications.unread_count}</span></p>
               </article>
@@ -2251,7 +2665,7 @@ function DashboardPage({
                       value={courseModuleId}
                       onChange={(e) => { setCourseModuleId(e.target.value); setCourseMatiereId(""); }}
                     >
-                      <option value="">â€” Sélectionner un module â€”</option>
+                      <option value="">— Sélectionner un module —</option>
                       {modulesList.map((m) => (
                         <option key={m.id} value={m.id}>{m.nom}</option>
                       ))}
@@ -2265,24 +2679,9 @@ function DashboardPage({
                       onChange={(e) => setCourseMatiereId(e.target.value)}
                       disabled={!courseModuleId}
                     >
-                      <option value="">â€” Sélectionner une matière â€”</option>
+                      <option value="">— Sélectionner une matière —</option>
                       {(modulesList.find((m) => m.id === courseModuleId)?.matieres ?? []).map((mat) => (
                         <option key={mat.id} value={mat.id}>{mat.nom}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="grid gap-1 text-sm md:col-span-2">
-                    Classe (optionnel)
-                    <select
-                      className="rounded border border-app-muted bg-white px-3 py-2 text-sm"
-                      value={courseClasseId}
-                      onChange={(e) => setCourseClasseId(e.target.value)}
-                    >
-                      <option value="">â€” Toutes les classes â€”</option>
-                      {instructeurData.classes.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.label} ({c.code} Â· Brigade {c.brigade})
-                        </option>
                       ))}
                     </select>
                   </label>
@@ -2310,12 +2709,12 @@ function DashboardPage({
                   </svg>
                   <input
                     className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                    placeholder="Rechercher un coursâ€¦"
+                    placeholder="Rechercher un cours…"
                     value={instructeurCoursSearch}
                     onChange={(e) => setInstructeurCoursSearch(e.target.value)}
                   />
                   {instructeurCoursSearch ? (
-                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setInstructeurCoursSearch("")} type="button">âœ•</button>
+                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setInstructeurCoursSearch("")} type="button">✕</button>
                   ) : null}
                 </div>
                 <div className="mt-3 space-y-2">
@@ -2323,7 +2722,7 @@ function DashboardPage({
                     .filter((c) => c.title.toLowerCase().includes(instructeurCoursSearch.toLowerCase()))
                     .map((c) => (
                       <div className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-3" key={c.id}>
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#15173D" }}>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
                           {c.title[0]?.toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -2399,7 +2798,7 @@ function DashboardPage({
                 <div className="mt-3 space-y-2">
                   {instructeurData.controles_list.map((c) => (
                     <div className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-3" key={c.id}>
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#982598" }}>
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
                         {c.name[0]?.toUpperCase()}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -2434,7 +2833,7 @@ function DashboardPage({
                   {instructeurData.controles_list.map((c) => (
                     <div className="rounded-xl border border-app-muted p-4" key={c.id}>
                       <div className="flex items-start gap-3 mb-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#15173D" }}>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
                           {c.name[0]?.toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -2450,7 +2849,7 @@ function DashboardPage({
                         <textarea
                           rows={3}
                           className="rounded-lg border border-app-muted bg-app-soft px-3 py-2 text-sm font-normal normal-case tracking-normal outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20 resize-none"
-                          placeholder="Rédigez la correction modèleâ€¦"
+                          placeholder="Rédigez la correction modèle…"
                           value={correctionText[c.id] ?? ""}
                           onChange={(e) => setCorrectionText((prev) => ({ ...prev, [c.id]: e.target.value }))}
                         />
@@ -2459,7 +2858,7 @@ function DashboardPage({
                         <p className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Correction PDF (corrigé officiel)</p>
                         <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-app-muted bg-app-soft px-3 py-2 text-xs text-app-dark/60 hover:border-app-accent hover:bg-white transition">
                           <svg className="h-4 w-4 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                          {correctionPdf[c.id] ? correctionPdf[c.id]!.name : "Joindre un PDFâ€¦"}
+                          {correctionPdf[c.id] ? correctionPdf[c.id]!.name : "Joindre un PDF…"}
                           <input type="file" accept=".pdf" className="hidden" onChange={(e) => setCorrectionPdf((prev) => ({ ...prev, [c.id]: e.target.files?.[0] ?? null }))} />
                         </label>
                         {correctionPdf[c.id] && (
@@ -2485,9 +2884,9 @@ function DashboardPage({
           {/* Corriger contrôle */}
           {instructeurView === "corriger" ? (
             <>
-              {/* â”€â”€ Soumissions à noter â”€â”€ */}
+              {/* ── Soumissions à noter ── */}
               <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                   <div>
                     <p className="text-base font-bold text-white">Soumissions à noter</p>
                     <p className="text-xs text-white/50 mt-0.5">Évaluez les réponses des stagiaires</p>
@@ -2500,7 +2899,7 @@ function DashboardPage({
                 <div className="divide-y divide-app-muted/40">
                   {instructeurData.pending_submissions.length === 0 && (
                     <div className="flex flex-col items-center gap-2 py-10 text-center">
-                      <span className="text-3xl">âœ…</span>
+                      <span className="text-3xl">✅</span>
                       <p className="text-sm font-medium text-app-dark/50">Aucune soumission en attente</p>
                     </div>
                   )}
@@ -2509,13 +2908,13 @@ function DashboardPage({
                       <div key={s.soumission_id} className="p-5">
                         {/* Card header */}
                         <div className="flex items-start gap-4 mb-4">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#982598" }}>
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
                             {String(s.stagiaire_id).slice(-2)}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-app-dark">{s.controle_name}</p>
                             <p className="text-xs text-app-dark/50 mt-0.5">
-                              Stagiaire #{s.stagiaire_id} Â· soumis le {new Date(s.submitted_at).toLocaleDateString("fr-FR")}
+                              Stagiaire #{s.stagiaire_id} · soumis le {new Date(s.submitted_at).toLocaleDateString("fr-FR")}
                             </p>
                           </div>
                           <span className="shrink-0 rounded-full bg-yellow-100 px-2.5 py-0.5 text-[11px] font-semibold text-yellow-700">En attente</span>
@@ -2550,7 +2949,7 @@ function DashboardPage({
                             <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Commentaire</label>
                             <input
                               className="rounded-lg border border-app-muted bg-app-soft px-3 py-2 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
-                              placeholder="Remarque optionnelleâ€¦"
+                              placeholder="Remarque optionnelle…"
                               value={evalCorrection[s.soumission_id] ?? ""}
                               onChange={(e) => setEvalCorrection((prev) => ({ ...prev, [s.soumission_id]: e.target.value }))}
                             />
@@ -2559,11 +2958,11 @@ function DashboardPage({
                         <button
                           type="button"
                           className="mt-3 rounded-xl px-5 py-2 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
-                          style={{ background: "#982598" }}
+                          style={{ background: "#1C352D" }}
                           disabled={!evalNote[s.soumission_id]}
                           onClick={() => void handleEvaluate(s.soumission_id)}
                         >
-                          âœ“ Publier la note
+                          ✓ Publier la note
                         </button>
                       </div>
                     );
@@ -2571,9 +2970,9 @@ function DashboardPage({
                 </div>
               </div>
 
-              {/* â”€â”€ Publier la correction â”€â”€ */}
+              {/* ── Publier la correction ── */}
               <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                   <div>
                     <p className="text-base font-bold text-white">Publier la correction officielle</p>
                     <p className="text-xs text-white/50 mt-0.5">Rédigez la correction modèle pour chaque contrôle</p>
@@ -2594,7 +2993,7 @@ function DashboardPage({
                     <div key={c.id} className="p-5">
                       {/* Header */}
                       <div className="flex items-start gap-4 mb-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#15173D" }}>
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
                           {c.name[0]?.toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -2612,7 +3011,7 @@ function DashboardPage({
                         <textarea
                           rows={3}
                           className="rounded-lg border border-app-muted bg-app-soft px-3 py-2 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20 resize-none"
-                          placeholder="Rédigez la correction modèleâ€¦"
+                          placeholder="Rédigez la correction modèle…"
                           value={correctionText[c.id] ?? ""}
                           onChange={(e) => setCorrectionText((prev) => ({ ...prev, [c.id]: e.target.value }))}
                         />
@@ -2622,7 +3021,7 @@ function DashboardPage({
                         <p className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Correction PDF (corrigé officiel)</p>
                         <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-app-muted bg-app-soft px-3 py-2 text-xs text-app-dark/60 hover:border-app-accent hover:bg-white transition">
                           <svg className="h-4 w-4 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                          {correctionPdf[c.id] ? correctionPdf[c.id]!.name : "Joindre un PDFâ€¦"}
+                          {correctionPdf[c.id] ? correctionPdf[c.id]!.name : "Joindre un PDF…"}
                           <input type="file" accept=".pdf" className="hidden" onChange={(e) => setCorrectionPdf((prev) => ({ ...prev, [c.id]: e.target.files?.[0] ?? null }))} />
                         </label>
                         {correctionPdf[c.id] && (
@@ -2632,11 +3031,11 @@ function DashboardPage({
                       <button
                         type="button"
                         className="rounded-xl px-5 py-2 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
-                        style={{ background: "#982598" }}
+                        style={{ background: "#1C352D" }}
                         disabled={!correctionText[c.id] && !correctionPdf[c.id]}
                         onClick={() => void handlePublishCorrection(c.id)}
                       >
-                        âœ“ Publier la correction
+                        ✓ Publier la correction
                       </button>
                     </div>
                   ))}
@@ -2650,26 +3049,26 @@ function DashboardPage({
             <div className="grid gap-5">
               {/* Upload form */}
               <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                <div className="flex items-center gap-3 border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                <div className="flex items-center gap-3 border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                   <svg className="h-4 w-4 text-white/70" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-                  <p className="font-bold text-white">Partager un fichier Word</p>
+                  <p className="font-bold text-white">Partager un fichier</p>
                 </div>
                 <div className="p-5 grid gap-3">
                   <div className="grid gap-1">
                     <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Titre (optionnel)</label>
                     <input
                       className="rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
-                      placeholder="Ex : Guide d'installation Visual Studioâ€¦"
+                      placeholder="Ex : Guide d'installation Visual Studio…"
                       value={installUploadTitre}
                       onChange={(e) => setInstallUploadTitre(e.target.value)}
                     />
                   </div>
                   <div className="grid gap-1">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Fichier Word (.doc, .docx)</label>
+                    <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Fichier (.doc, .docx, .zip)</label>
                     <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-app-muted bg-app-soft px-4 py-3 transition hover:border-app-accent hover:bg-white">
                       <svg className="h-5 w-5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                      <span className="text-sm text-app-dark/60">{installUploadFile ? installUploadFile.name : "Choisir un fichier Wordâ€¦"}</span>
-                      <input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={(e) => setInstallUploadFile(e.target.files?.[0] ?? null)} />
+                      <span className="text-sm text-app-dark/60">{installUploadFile ? installUploadFile.name : "Choisir un fichier Word…"}</span>
+                      <input type="file" accept=".doc,.docx,.zip,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/zip,application/x-zip-compressed" className="hidden" onChange={(e) => setInstallUploadFile(e.target.files?.[0] ?? null)} />
                     </label>
                   </div>
                   <button
@@ -2677,21 +3076,21 @@ function DashboardPage({
                     disabled={!installUploadFile || installUploading}
                     onClick={() => void handleInstallUpload()}
                     className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
-                    style={{ background: "#15173D" }}
+                    style={{ background: "#1C352D" }}
                   >
                     {installUploading ? (
                       <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
                     ) : (
                       <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                     )}
-                    {installUploading ? "Envoi en coursâ€¦" : "Partager le fichier"}
+                    {installUploading ? "Envoi en cours…" : "Partager le fichier"}
                   </button>
                 </div>
               </div>
 
               {/* Files list */}
               <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                   <p className="font-bold text-white">Fichiers partagés</p>
                   <div className="flex items-center gap-2">
                     <span className="rounded-full bg-white/20 px-3 py-0.5 text-xs font-bold text-white">{installFichiers.length}</span>
@@ -2709,16 +3108,37 @@ function DashboardPage({
                     </div>
                   ) : installFichiers.map((f) => (
                     <div key={f.id} className="flex items-center gap-4 px-5 py-3">
-                      <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      {isZipFichier(f) ? (
+                        <svg className="h-8 w-8 shrink-0 text-orange-400" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6zM11 11h2v2h-2zm0 3h2v2h-2zm0 3h2v2h-2z"/></svg>
+                      ) : (
+                        <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
-                        <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                        <p className="text-xs text-app-dark/40">{f.nom_fichier} · {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
-                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                          Télécharger
-                        </button>
+                        {isZipFichier(f) ? (
+                          <>
+                            <button type="button" onClick={() => void handleOpenZipModal(f)} disabled={zipLoadingId === f.id} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white disabled:opacity-50">
+                              {zipLoadingId === f.id ? (
+                                <svg className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                              ) : (
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                              )}
+                              Voir le contenu
+                            </button>
+                            <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                              ↓ ZIP complet
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            Télécharger
+                          </button>
+                        )}
                         <button type="button" onClick={() => void handleInstallDelete(f.id)} className="flex h-7 w-7 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 transition" title="Supprimer">
                           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
@@ -2732,30 +3152,11 @@ function DashboardPage({
 
           {/* Sujet fin de stage */}
           {instructeurView === "sujet" ? (
-            <>
-              <article className="card-hover rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-semibold">Sujets fin de stage encadrés</h3>
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  <div className="rounded-lg border border-app-muted/70 bg-app-soft px-3 py-2">
-                    <p className="text-xs uppercase tracking-wide text-app-dark/60">Total</p>
-                    <p className="mt-1 text-xl font-semibold">{instructeurData.sujets_fin_stage.total}</p>
-                  </div>
-                  <div className="rounded-lg border border-app-muted/70 bg-app-soft px-3 py-2">
-                    <p className="text-xs uppercase tracking-wide text-app-dark/60">En cours</p>
-                    <p className="mt-1 text-xl font-semibold text-app-accent">{instructeurData.sujets_fin_stage.active}</p>
-                  </div>
-                </div>
-                <div className="mt-4 space-y-2">
-                  {instructeurData.sujets_fin_stage.list.map((s, i) => (
-                    <div className="rounded border border-app-muted p-3" key={i}>
-                      <p className="text-sm font-semibold">{s.sujet}</p>
-                      <p className="text-xs text-app-dark/60">Stagiaire #{s.stagiaire_id} Â· État: <span className={s.etat === "EN_COURS" ? "text-app-accent font-semibold" : ""}>{s.etat}</span></p>
-                    </div>
-                  ))}
-                  {instructeurData.sujets_fin_stage.list.length === 0 ? <EmptyState message="Aucun sujet de fin de stage assigné." /> : null}
-                </div>
-              </article>
-            </>
+            <SujetFinStageInstructeurPanel
+              instructeurData={instructeurData}
+              apiFetch={apiFetch}
+              onRefresh={loadDashboard}
+            />
           ) : null}
           </div>
         </section>
@@ -2763,13 +3164,13 @@ function DashboardPage({
 
       {user.role === "Stagiaire" && stageaireData ? (
         <section className="mt-6 flex gap-0 min-h-[calc(100vh-120px)]">
-          {/* â”€â”€ Sidebar â”€â”€ */}
+          {/* ── Sidebar ── */}
           <aside className="sidebar-animated w-56 min-w-[14rem] flex-shrink-0 flex flex-col overflow-hidden rounded-l-2xl border border-r-0 border-app-muted bg-white shadow-sm">
 
             {/* Profile header */}
-            <div className="px-4 pt-5 pb-4 border-b border-app-muted/60" style={{ background: "linear-gradient(160deg,#15173D 0%,#1E1F4A 100%)" }}>
+            <div className="px-4 pt-5 pb-4 border-b border-app-muted/60" style={{ background: "linear-gradient(160deg,#1C352D 0%,#224035 100%)" }}>
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full text-base font-bold text-white ring-2 ring-white/20" style={{ background: "#982598" }}>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full text-base font-bold text-white ring-2 ring-white/20" style={{ background: "#1C352D" }}>
                   {user.username.charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0">
@@ -2790,7 +3191,7 @@ function DashboardPage({
                   <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all"
-                      style={{ width: `${Math.min(100, Math.round((stageaireData.controls.submitted_count / stageaireData.controls.available_count) * 100))}%`, background: "#982598" }}
+                      style={{ width: `${Math.min(100, Math.round((stageaireData.controls.submitted_count / stageaireData.controls.available_count) * 100))}%`, background: "#A6B28B" }}
                     />
                   </div>
                 </div>
@@ -2809,7 +3210,7 @@ function DashboardPage({
                     type="button"
                     onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); }}
                     className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                    style={{ background: active ? "#1C352D" : "transparent", color: active ? "white" : "#1C352D" }}
                   >
                     <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -2832,7 +3233,7 @@ function DashboardPage({
                     setCoursFileCache({});
                   }}
                   className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                  style={{ background: stageaireView === "cours" ? "#15173D" : "transparent", color: stageaireView === "cours" ? "white" : "#15173D" }}
+                  style={{ background: stageaireView === "cours" ? "#1C352D" : "transparent", color: stageaireView === "cours" ? "white" : "#1C352D" }}
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={stageaireView === "cours" ? 2.5 : 2} viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -2855,7 +3256,7 @@ function DashboardPage({
                           type="button"
                           onClick={() => { setStageaireView("cours"); handleOpenModule(m); }}
                           className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium transition text-left"
-                          style={{ background: isModActive ? "#15173D" : "transparent", color: isModActive ? "white" : "#15173D" }}
+                          style={{ background: isModActive ? "#1C352D" : "transparent", color: isModActive ? "white" : "#1C352D" }}
                           title={m.nom}
                         >
                           <svg className="h-3 w-3 shrink-0 opacity-60" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /></svg>
@@ -2883,14 +3284,14 @@ function DashboardPage({
                     type="button"
                     onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); }}
                     className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                    style={{ background: active ? "#1C352D" : "transparent", color: active ? "white" : "#1C352D" }}
                   >
                     <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                     </svg>
                     <span className="flex-1">Contrôles</span>
                     {badge > 0 && (
-                      <span className="shrink-0 rounded-full px-1.5 py-0.5 text-xs font-bold leading-none" style={{ background: active ? "rgba(255,255,255,0.2)" : "#982598", color: "white" }}>
+                      <span className="shrink-0 rounded-full px-1.5 py-0.5 text-xs font-bold leading-none" style={{ background: active ? "rgba(255,255,255,0.2)" : "#A6B28B", color: "white" }}>
                         {badge}
                       </span>
                     )}
@@ -2908,14 +3309,14 @@ function DashboardPage({
                     type="button"
                     onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); }}
                     className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                    style={{ background: active ? "#1C352D" : "transparent", color: active ? "white" : "#1C352D" }}
                   >
                     <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     <span className="flex-1">Sujet fin de stage</span>
                     {stageaireData.sujet_fin_stage && (
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: stageaireData.sujet_fin_stage.etat === "EN_COURS" ? "#982598" : "#22c55e" }} />
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: stageaireData.sujet_fin_stage.etat === "EN_COURS" ? "#A6B28B" : "#22c55e" }} />
                     )}
                   </button>
                 );
@@ -2930,7 +3331,7 @@ function DashboardPage({
                     type="button"
                     onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); void loadInstallFichiers(); }}
                     className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                    style={{ background: active ? "#1C352D" : "transparent", color: active ? "white" : "#1C352D" }}
                   >
                     <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -2949,7 +3350,7 @@ function DashboardPage({
                     type="button"
                     onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); void loadFeuilleRFichiers(); }}
                     className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
-                    style={{ background: active ? "#15173D" : "transparent", color: active ? "white" : "#15173D" }}
+                    style={{ background: active ? "#1C352D" : "transparent", color: active ? "white" : "#1C352D" }}
                   >
                     <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -2973,34 +3374,34 @@ function DashboardPage({
                   <p className="text-base font-black text-emerald-600">{stageaireData.controls.submitted_count}</p>
                   <p className="text-xs text-app-dark/50">Soumis</p>
                 </div>
-                <div className="rounded-lg py-2" style={{ background: stageaireData.controls.pending_count > 0 ? "rgba(152,37,152,0.1)" : "#F1E9E9" }}>
-                  <p className="text-base font-black" style={{ color: stageaireData.controls.pending_count > 0 ? "#982598" : "#15173D" }}>{stageaireData.controls.pending_count}</p>
+                <div className="rounded-lg py-2" style={{ background: stageaireData.controls.pending_count > 0 ? "rgba(166,178,139,0.1)" : "#F9F6F3" }}>
+                  <p className="text-base font-black" style={{ color: stageaireData.controls.pending_count > 0 ? "#A6B28B" : "#1C352D" }}>{stageaireData.controls.pending_count}</p>
                   <p className="text-xs text-app-dark/50">Attente</p>
                 </div>
               </div>
             </div>
           </aside>
 
-          {/* â”€â”€ Main content â”€â”€ */}
+          {/* ── Main content ── */}
           <div className="flex-1 overflow-y-auto rounded-r-2xl border border-app-muted bg-app-soft/40 p-6 grid gap-5 content-start">
 
-            {/* â”€â”€ DASHBOARD â”€â”€ */}
+            {/* ── DASHBOARD ── */}
             {stageaireView === "dashboard" ? (
               <>
                 {/* Hero banner */}
-                <div className="relative overflow-hidden rounded-2xl p-8 shadow-lg" style={{ background: "linear-gradient(135deg,#0E0F29 0%,#15173D 60%,#1E1F4A 100%)" }}>
-                  <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full opacity-10" style={{ background: "#982598" }} />
-                  <div className="pointer-events-none absolute -bottom-8 right-24 h-32 w-32 rounded-full opacity-10" style={{ background: "#982598" }} />
+                <div className="relative overflow-hidden rounded-2xl p-8 shadow-lg" style={{ background: "linear-gradient(135deg,#162b22 0%,#1C352D 60%,#224035 100%)" }}>
+                  <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full opacity-10" style={{ background: "#1C352D" }} />
+                  <div className="pointer-events-none absolute -bottom-8 right-24 h-32 w-32 rounded-full opacity-10" style={{ background: "#1C352D" }} />
                   <div className="relative flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-widest text-white/50">Espace Stagiaire</p>
                       <h1 className="mt-1 text-2xl font-black uppercase leading-tight text-white md:text-3xl">
-                        Bienvenue,<br /><span style={{ color: "#E491C9" }}>{user.username}</span>
+                        Bienvenue,<br /><span style={{ color: "#A6B28B" }}>{user.username}</span>
                       </h1>
                       <p className="mt-2 max-w-sm text-sm text-white/60">Accédez à vos cours, suivez vos contrôles et consultez votre progression.</p>
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <button className="rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#982598" }} onClick={() => { setStageaireView("cours"); setModulesExpanded(true); }} type="button">
-                          Mes modules â†’
+                        <button className="rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:opacity-90" style={{ background: "#1C352D" }} onClick={() => { setStageaireView("cours"); setModulesExpanded(true); }} type="button">
+                          Mes modules →
                         </button>
                         {stageaireData.controls.pending_count > 0 && (
                           <button className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20" onClick={() => setStageaireView("controles")} type="button">
@@ -3012,7 +3413,7 @@ function DashboardPage({
                     <div className="flex shrink-0 gap-3">
                       {[
                         { label: "Cours", value: (stageaireData.cours_list ?? []).length, color: "white" },
-                        { label: "Contrôles", value: stageaireData.controls.available_count, color: "#E491C9" },
+                        { label: "Contrôles", value: stageaireData.controls.available_count, color: "#A6B28B" },
                         { label: "Soumis", value: stageaireData.controls.submitted_count, color: "#22c55e" },
                       ].map((s) => (
                         <div key={s.label} className="flex flex-col items-center justify-center rounded-2xl px-4 py-3 text-center" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -3031,7 +3432,7 @@ function DashboardPage({
                     onClick={() => { setStageaireView("cours"); setModulesExpanded(true); }}
                     className="group flex items-center gap-4 rounded-2xl border border-app-muted bg-white p-5 text-left shadow-sm transition hover:border-app-dark/30 hover:shadow-md"
                   >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(21,23,61,0.08)" }}>
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(28,53,45,0.08)" }}>
                       <svg className="h-5 w-5 text-app-dark" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                       </svg>
@@ -3047,16 +3448,16 @@ function DashboardPage({
                     type="button"
                     onClick={() => setStageaireView("controles")}
                     className="group flex items-center gap-4 rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:shadow-md"
-                    style={{ borderColor: stageaireData.controls.pending_count > 0 ? "rgba(152,37,152,0.35)" : undefined }}
+                    style={{ borderColor: stageaireData.controls.pending_count > 0 ? "rgba(166,178,139,0.35)" : undefined }}
                   >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: stageaireData.controls.pending_count > 0 ? "rgba(152,37,152,0.1)" : "rgba(21,23,61,0.08)" }}>
-                      <svg className="h-5 w-5" style={{ color: stageaireData.controls.pending_count > 0 ? "#982598" : "#15173D" }} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: stageaireData.controls.pending_count > 0 ? "rgba(166,178,139,0.1)" : "rgba(28,53,45,0.08)" }}>
+                      <svg className="h-5 w-5" style={{ color: stageaireData.controls.pending_count > 0 ? "#A6B28B" : "#1C352D" }} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                       </svg>
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-app-dark">Mes contrôles</p>
-                      <p className="mt-0.5 text-xs" style={{ color: stageaireData.controls.pending_count > 0 ? "#982598" : "rgba(21,23,61,0.5)" }}>
+                      <p className="mt-0.5 text-xs" style={{ color: stageaireData.controls.pending_count > 0 ? "#A6B28B" : "rgba(28,53,45,0.5)" }}>
                         {stageaireData.controls.pending_count > 0 ? `${stageaireData.controls.pending_count} en attente` : `${stageaireData.controls.submitted_count} soumis`}
                       </p>
                     </div>
@@ -3068,7 +3469,7 @@ function DashboardPage({
                     onClick={() => { setStageaireView("controles"); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); }}
                     className="group flex items-center gap-4 rounded-2xl border border-app-muted bg-white p-5 text-left shadow-sm transition hover:border-app-dark/30 hover:shadow-md"
                   >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(21,23,61,0.08)" }}>
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ background: "rgba(28,53,45,0.08)" }}>
                       <svg className="h-5 w-5 text-app-dark" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                       </svg>
@@ -3087,7 +3488,7 @@ function DashboardPage({
                   <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-3">Mon profil</p>
                     <div className="flex items-center gap-3 mb-4">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-lg font-bold text-white" style={{ background: "#15173D" }}>
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-lg font-bold text-white" style={{ background: "#1C352D" }}>
                         {user?.username?.[0]?.toUpperCase() ?? "?"}
                       </div>
                       <div>
@@ -3099,10 +3500,10 @@ function DashboardPage({
                     </div>
                     <div className="grid grid-cols-2 gap-3 border-t border-app-muted/60 pt-3">
                       {[
-                        { label: "Matricule", value: user?.matricule || "â€”" },
-                        { label: "Corps", value: user?.corps?.label ?? (user?.est_civil ? "Civil" : "â€”") },
-                        { label: "Email", value: user?.email || "â€”" },
-                        { label: "Spécialité", value: user?.speciality?.label || "â€”" },
+                        { label: "Matricule", value: user?.matricule || "—" },
+                        { label: "Corps", value: user?.corps?.label ?? (user?.est_civil ? "Civil" : "—") },
+                        { label: "Email", value: user?.email || "—" },
+                        { label: "Spécialité", value: user?.speciality?.label || "—" },
                       ].map((f) => (
                         <div key={f.label}>
                           <p className="text-xs text-app-dark/40">{f.label}</p>
@@ -3110,7 +3511,7 @@ function DashboardPage({
                         </div>
                       ))}
                     </div>
-                    {/* Fichier de renseignement â€” only shown until submitted */}
+                    {/* Fichier de renseignement — only shown until submitted */}
                     {stagiaireFichierStatus !== null && !stagiaireFichierStatus.has_fichier && (
                       <div className="border-t border-app-muted/60 pt-3 mt-3">
                         <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Fichier de renseignement</p>
@@ -3131,7 +3532,7 @@ function DashboardPage({
                             </label>
                             <button
                               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white transition disabled:opacity-40"
-                              style={{ background: "#15173D" }}
+                              style={{ background: "#1C352D" }}
                               disabled={!stagiaireFichierUploadFile || stagiaireFichierUploading}
                               onClick={() => void handleStageaireUploadFichierRenseignement()}
                               type="button"
@@ -3161,7 +3562,7 @@ function DashboardPage({
                           ))}
                           {stageaireData.notes.length > 3 && (
                             <button type="button" onClick={() => { setStageaireView("controles"); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); }} className="text-xs text-app-accent font-semibold hover:underline">
-                              +{stageaireData.notes.length - 3} autre{stageaireData.notes.length - 3 > 1 ? "s" : ""} â†’
+                              +{stageaireData.notes.length - 3} autre{stageaireData.notes.length - 3 > 1 ? "s" : ""} →
                             </button>
                           )}
                         </div>
@@ -3175,7 +3576,7 @@ function DashboardPage({
                     <div className="flex items-center justify-between mb-3">
                       <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Notifications récentes</p>
                       {stageaireData.notifications.unread_count > 0 && (
-                        <span className="rounded-full px-2 py-0.5 text-xs font-bold text-white" style={{ background: "#982598" }}>
+                        <span className="rounded-full px-2 py-0.5 text-xs font-bold text-white" style={{ background: "#1C352D" }}>
                           {stageaireData.notifications.unread_count} non lues
                         </span>
                       )}
@@ -3183,7 +3584,7 @@ function DashboardPage({
                     <div className="space-y-2">
                       {stageaireData.notifications.latest.map((n) => (
                         <div key={`notif-${n.id}`} className="flex gap-3 rounded-xl border border-app-muted/60 bg-app-soft/60 p-3">
-                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "rgba(152,37,152,0.12)" }}>
+                          <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: "rgba(166,178,139,0.12)" }}>
                             {n.type === "nouveau_cours" ? (
                               <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                             ) : n.type === "correction_publiee" ? (
@@ -3205,7 +3606,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* â”€â”€ COURS â€” no module selected â”€â”€ */}
+            {/* ── COURS — no module selected ── */}
             {stageaireView === "cours" && !selectedModule && !selectedMatiere && !selectedCours ? (
               <article className="rounded-2xl border border-app-muted bg-white p-8 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Modules de formation</p>
@@ -3218,7 +3619,7 @@ function DashboardPage({
                         onClick={() => { handleOpenModule(m); setModulesExpanded(true); }}
                         className="group flex items-center gap-4 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm"
                       >
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#15173D" }}>
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#1C352D" }}>
                           <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                         </div>
                         <div className="min-w-0 flex-1">
@@ -3231,7 +3632,7 @@ function DashboardPage({
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-3 py-12 text-center">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "rgba(21,23,61,0.06)" }}>
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "rgba(28,53,45,0.06)" }}>
                       <svg className="h-7 w-7 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                     </div>
                     <div>
@@ -3243,7 +3644,7 @@ function DashboardPage({
               </article>
             ) : null}
 
-            {/* â”€â”€ COURS â€” matière list within a module â”€â”€ */}
+            {/* ── COURS — matière list within a module ── */}
             {stageaireView === "cours" && selectedModule && !selectedMatiere && !selectedCours ? (
               <>
                 {/* Breadcrumb */}
@@ -3255,7 +3656,7 @@ function DashboardPage({
 
                 <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                   <div className="flex items-center gap-3 mb-5">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#15173D" }}>
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#1C352D" }}>
                       <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                     </div>
                     <div>
@@ -3272,7 +3673,7 @@ function DashboardPage({
                           onClick={() => void handleOpenMatiere(mat.id)}
                           className="group flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm"
                         >
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(166,178,139,0.1)" }}>
                             <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                           </div>
                           <div className="flex-1 min-w-0">
@@ -3280,7 +3681,7 @@ function DashboardPage({
                             <p className="mt-0.5 text-xs text-app-dark/50">{mat.cours_count} cours</p>
                           </div>
                           {mat.cours_count > 0 ? (
-                            <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#15173D" }}>{mat.cours_count}</span>
+                            <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }}>{mat.cours_count}</span>
                           ) : (
                             <span className="shrink-0 rounded-full bg-app-muted/50 px-2 py-0.5 text-xs text-app-dark/40">0</span>
                           )}
@@ -3299,7 +3700,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* â”€â”€ COURS â€” matière: brochures or direct cours â”€â”€ */}
+            {/* ── COURS — matière: brochures or direct cours ── */}
             {stageaireView === "cours" && selectedMatiere && !selectedBrochure && !selectedCours ? (
               <>
                 {/* Breadcrumb */}
@@ -3313,12 +3714,12 @@ function DashboardPage({
 
                 {selectedMatiere.brochures.length > 0 ? (
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures â€” {selectedMatiere.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures — {selectedMatiere.nom}</p>
                     <div className="grid gap-3 md:grid-cols-2">
                       {selectedMatiere.brochures.map((b) => (
                         <button key={`brochure-${b.id}`} type="button" onClick={() => void handleOpenBrochure(b.id)}
                           className="group flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(21,23,61,0.08)" }}>
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(28,53,45,0.08)" }}>
                             <svg className="h-4 w-4 text-app-dark" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
                           </div>
                           <div className="flex-1 min-w-0">
@@ -3329,7 +3730,7 @@ function DashboardPage({
                             <p className="mt-0.5 text-xs text-app-dark/50">{b.cours_count} cours</p>
                           </div>
                           {b.cours_count > 0 ? (
-                            <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#15173D" }}>{b.cours_count}</span>
+                            <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }}>{b.cours_count}</span>
                           ) : (
                             <span className="shrink-0 rounded-full bg-app-muted/50 px-2 py-0.5 text-xs text-app-dark/40">0</span>
                           )}
@@ -3339,13 +3740,13 @@ function DashboardPage({
                   </article>
                 ) : (
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Cours â€” {selectedMatiere.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Cours — {selectedMatiere.nom}</p>
                     {selectedMatiere.cours.length > 0 ? (
                       <div className="grid gap-3 md:grid-cols-2">
                         {selectedMatiere.cours.map((c) => (
                           <button key={`cours-${c.id}`} type="button" onClick={() => void openCoursModal(c.id)}
                             className="group flex items-start gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-accent/30 hover:bg-white hover:shadow-sm">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(166,178,139,0.1)" }}>
                               <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -3357,7 +3758,7 @@ function DashboardPage({
                               <div className="mt-2 flex items-center gap-2 flex-wrap">
                                 <span className="text-xs text-app-dark/40">{c.instructeur}</span>
                                 {c.controles_count > 0 && (
-                                  <span className="rounded-full px-1.5 py-0.5 text-xs font-semibold text-white" style={{ background: "#982598" }}>
+                                  <span className="rounded-full px-1.5 py-0.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }}>
                                     {c.controles_count} contrôle{c.controles_count > 1 ? "s" : ""}
                                   </span>
                                 )}
@@ -3380,7 +3781,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* â”€â”€ COURS â€” brochure cours list â”€â”€ */}
+            {/* ── COURS — brochure cours list ── */}
             {stageaireView === "cours" && selectedBrochure && !selectedCours ? (
               <>
                 {/* Breadcrumb */}
@@ -3394,7 +3795,7 @@ function DashboardPage({
 
                 <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                   <div className="flex items-center gap-3 flex-wrap mb-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours â€” {selectedBrochure.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours — {selectedBrochure.nom}</p>
                     <TagBadge nom={selectedBrochure.nom} />
                   </div>
                   {selectedBrochure.cours.length > 0 ? (
@@ -3402,7 +3803,7 @@ function DashboardPage({
                       {selectedBrochure.cours.map((c) => (
                         <button key={`cours-${c.id}`} type="button" onClick={() => void openCoursModal(c.id)}
                           className="group flex items-start gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-accent/30 hover:bg-white hover:shadow-sm">
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(166,178,139,0.1)" }}>
                             <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
                           </div>
                           <div className="flex-1 min-w-0">
@@ -3414,7 +3815,7 @@ function DashboardPage({
                             <div className="mt-2 flex items-center gap-2 flex-wrap">
                               <span className="text-xs text-app-dark/40">{c.instructeur}</span>
                               {c.controles_count > 0 && (
-                                <span className="rounded-full px-1.5 py-0.5 text-xs font-semibold text-white" style={{ background: "#982598" }}>
+                                <span className="rounded-full px-1.5 py-0.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }}>
                                   {c.controles_count} contrôle{c.controles_count > 1 ? "s" : ""}
                                 </span>
                               )}
@@ -3436,7 +3837,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* Cours â€” detail with PDF viewer */}
+            {/* Cours — detail with PDF viewer */}
             {stageaireView === "cours" && selectedCours ? (
               <>
                 {/* Back button + header */}
@@ -3446,7 +3847,7 @@ function DashboardPage({
                     onClick={() => { setSelectedCours(null); setCoursFileCache({}); }}
                     className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-white px-3 py-2 text-sm font-semibold text-app-dark shadow-sm transition hover:bg-app-soft"
                   >
-                    â† Retour aux cours
+                    ← Retour aux cours
                   </button>
                   {selectedCours.matiere ? (
                     <span className="text-sm text-app-dark/50">{selectedCours.matiere}</span>
@@ -3465,7 +3866,7 @@ function DashboardPage({
                   <p className="mt-3 text-xs text-app-dark/50">Instructeur : <span className="font-semibold text-app-dark">{selectedCours.instructeur}</span> &mdash; Déposé le {selectedCours.date_depot}</p>
                 </article>
 
-                {/* Course files â€” inline viewer */}
+                {/* Course files — inline viewer */}
                 {selectedCours.fichiers.map((f) => {
                   const cached = coursFileCache[f.id_cours_fichier];
                   const isPdf = cached
@@ -3480,7 +3881,7 @@ function DashboardPage({
                     return (
                       <div key={f.id_cours_fichier} className="flex items-center gap-3 rounded-xl border border-app-muted bg-white px-4 py-4">
                         <div className="skeleton h-5 w-5 rounded" />
-                        <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}â€¦</span>
+                        <span className="text-sm text-app-dark/50">Chargement de {f.nom_fichier}…</span>
                       </div>
                     );
                   }
@@ -3506,7 +3907,7 @@ function DashboardPage({
                       <button
                         type="button"
                         className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
-                        style={{ background: "#982598" }}
+                        style={{ background: "#1C352D" }}
                         onClick={() => triggerDownload(cached.base64, cached.name, cached.mimeType)}
                       >
                         ↓ Télécharger
@@ -3541,7 +3942,7 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* â”€â”€ CONTRÃ”LES â”€â”€ */}
+            {/* ── CONTRÃ”LES ── */}
             {stageaireView === "controles" ? (
               <>
                 {detailControleId === null ? (
@@ -3549,9 +3950,9 @@ function DashboardPage({
                     {/* Stats bar */}
                     <div className="grid grid-cols-3 gap-3">
                       {[
-                        { label: "Disponibles", value: stageaireData.controls.available_count, color: "#15173D" },
+                        { label: "Disponibles", value: stageaireData.controls.available_count, color: "#1C352D" },
                         { label: "Soumis", value: stageaireData.controls.submitted_count, color: "#22c55e" },
-                        { label: "En attente", value: stageaireData.controls.pending_count, color: "#982598" },
+                        { label: "En attente", value: stageaireData.controls.pending_count, color: "#A6B28B" },
                       ].map((s) => (
                         <div key={s.label} className="rounded-2xl border border-app-muted bg-white p-4 text-center shadow-sm">
                           <p className="text-2xl font-black" style={{ color: s.color }}>{s.value}</p>
@@ -3561,7 +3962,7 @@ function DashboardPage({
                     </div>
 
                     <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                      <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                      <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
                         <h3 className="font-bold text-white">Contrôles à réaliser</h3>
                         <p className="mt-0.5 text-xs text-white/50">Cliquez sur un contrôle pour le consulter et soumettre votre réponse.</p>
                       </div>
@@ -3577,7 +3978,7 @@ function DashboardPage({
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex items-center gap-3 min-w-0">
-                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: submitted ? "rgba(34,197,94,0.1)" : "rgba(152,37,152,0.1)" }}>
+                                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: submitted ? "rgba(34,197,94,0.1)" : "rgba(166,178,139,0.1)" }}>
                                     {submitted ? (
                                       <svg className="h-4 w-4 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                                     ) : (
@@ -3591,14 +3992,14 @@ function DashboardPage({
                                 </div>
                                 <div className="flex flex-col items-end gap-1.5 shrink-0">
                                   {submitted ? (
-                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">âœ“ Soumis</span>
+                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700">✓ Soumis</span>
                                   ) : (
                                     <span className="rounded-full px-2 py-0.5 text-xs font-bold text-white" style={{ background: isOverdue ? "#ef4444" : "#f59e0b" }}>
                                       {isOverdue ? "En retard" : "Ã€ faire"}
                                     </span>
                                   )}
                                   {control.deadline && (
-                                    <span className="text-xs" style={{ color: isOverdue ? "#ef4444" : "rgba(21,23,61,0.4)" }}>
+                                    <span className="text-xs" style={{ color: isOverdue ? "#ef4444" : "rgba(28,53,45,0.4)" }}>
                                       {new Date(control.deadline).toLocaleDateString("fr-FR")}
                                     </span>
                                   )}
@@ -3613,15 +4014,15 @@ function DashboardPage({
                                   if (control.has_fichier_enonce) void loadDetailControlePdf(control.id);
                                 }}
                                 className="mt-3 w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
-                                style={{ background: "#15173D" }}
+                                style={{ background: "#1C352D" }}
                               >
-                                Voir le contrôle â†’
+                                Voir le contrôle →
                               </button>
                             </div>
                           );
                         }) : (
                           <div className="flex flex-col items-center gap-3 py-10 text-center">
-                            <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "rgba(21,23,61,0.06)" }}>
+                            <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: "rgba(28,53,45,0.06)" }}>
                               <svg className="h-7 w-7 text-app-dark/25" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
                             </div>
                             <div>
@@ -3635,7 +4036,7 @@ function DashboardPage({
 
                     {(stageaireData.soumissions_detail ?? []).length > 0 && (
                       <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
                           <div className="flex items-center gap-3">
                             <svg className="h-4 w-4 text-white/70" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             <h3 className="font-bold text-white">Mes réponses</h3>
@@ -3673,15 +4074,15 @@ function DashboardPage({
                                 <div className="space-y-2">
                                   <div className="rounded-lg border border-app-muted/60 bg-white p-3">
                                     <p className="text-xs font-semibold text-app-dark/60 mb-1">
-                                      {s.correction_titre ? `Correction â€” ${s.correction_titre}` : "Correction officielle"}
+                                      {s.correction_titre ? `Correction — ${s.correction_titre}` : "Correction officielle"}
                                     </p>
                                     <p className="text-sm text-app-dark/80 whitespace-pre-wrap leading-relaxed">{s.correction_publiee}</p>
                                   </div>
                                   {correctionFichier[s.controle_id] ? (
                                     <div className="rounded-xl border border-app-muted bg-white overflow-hidden">
-                                      <div className="flex items-center justify-between px-4 py-2 border-b border-app-muted/60" style={{ background: "#15173D" }}>
-                                        <p className="text-xs font-bold text-white">Correction PDF â€” {correctionFichier[s.controle_id]!.name}</p>
-                                        <button type="button" onClick={() => setCorrectionFichier((prev) => ({ ...prev, [s.controle_id]: null }))} className="text-white/50 hover:text-white text-xs">âœ• Fermer</button>
+                                      <div className="flex items-center justify-between px-4 py-2 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
+                                        <p className="text-xs font-bold text-white">Correction PDF — {correctionFichier[s.controle_id]!.name}</p>
+                                        <button type="button" onClick={() => setCorrectionFichier((prev) => ({ ...prev, [s.controle_id]: null }))} className="text-white/50 hover:text-white text-xs">✕ Fermer</button>
                                       </div>
                                       <div className="p-3">
                                         {correctionFichier[s.controle_id]!.mimeType === "application/pdf" || correctionFichier[s.controle_id]!.name.toLowerCase().endsWith(".pdf")
@@ -3690,7 +4091,7 @@ function DashboardPage({
                                             <div className="flex items-center gap-3 p-3">
                                               <span className="text-base">ðŸ“Ž</span>
                                               <p className="flex-1 text-sm font-medium text-app-dark">{correctionFichier[s.controle_id]!.name}</p>
-                                              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: "#982598" }} onClick={() => triggerDownload(correctionFichier[s.controle_id]!.base64, correctionFichier[s.controle_id]!.name, correctionFichier[s.controle_id]!.mimeType)}>↓ Télécharger</button>
+                                              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }} onClick={() => triggerDownload(correctionFichier[s.controle_id]!.base64, correctionFichier[s.controle_id]!.name, correctionFichier[s.controle_id]!.mimeType)}>↓ Télécharger</button>
                                             </div>
                                           )
                                         }
@@ -3708,7 +4109,7 @@ function DashboardPage({
                                       ) : (
                                         <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
                                       )}
-                                      {correctionFichierLoading[s.controle_id] ? "Chargementâ€¦" : "Voir la correction PDF"}
+                                      {correctionFichierLoading[s.controle_id] ? "Chargement…" : "Voir la correction PDF"}
                                     </button>
                                   )}
                                 </div>
@@ -3728,7 +4129,7 @@ function DashboardPage({
                                 }}
                                 className="mt-1 rounded-lg border border-app-muted px-3 py-1.5 text-xs font-semibold text-app-dark/70 transition hover:bg-app-soft"
                               >
-                                Voir le contrôle â†’
+                                Voir le contrôle →
                               </button>
                             </div>
                           ))}
@@ -3778,14 +4179,14 @@ function DashboardPage({
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0">
                           {submitted ? (
-                            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">âœ“ Soumis</span>
+                            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-700">✓ Soumis</span>
                           ) : (
                             <span className="rounded-full px-2.5 py-0.5 text-xs font-bold text-white" style={{ background: isOverdue ? "#ef4444" : "#f59e0b" }}>
                               {isOverdue ? "En retard" : "Ã€ faire"}
                             </span>
                           )}
                           {ctrl?.deadline && (
-                            <span className="text-xs" style={{ color: isOverdue ? "#ef4444" : "rgba(21,23,61,0.4)" }}>
+                            <span className="text-xs" style={{ color: isOverdue ? "#ef4444" : "rgba(28,53,45,0.4)" }}>
                               Limite : {new Date(ctrl.deadline).toLocaleDateString("fr-FR")}
                             </span>
                           )}
@@ -3794,7 +4195,7 @@ function DashboardPage({
 
                       {/* Énoncé section */}
                       <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
                           <h3 className="font-bold text-white">Énoncé</h3>
                           {ctrl?.bareme ? <p className="mt-0.5 text-xs text-white/50">Barème : {ctrl.bareme} pts</p> : null}
                         </div>
@@ -3807,7 +4208,7 @@ function DashboardPage({
                           {detailControlePdfLoading && (
                             <div className="flex items-center gap-2 py-6 justify-center text-app-dark/50">
                               <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
-                              <span className="text-sm">Chargement du fichier PDFâ€¦</span>
+                              <span className="text-sm">Chargement du fichier PDF…</span>
                             </div>
                           )}
                           {detailControlePdf && !detailControlePdfLoading && (
@@ -3825,7 +4226,7 @@ function DashboardPage({
                                     <button
                                       type="button"
                                       className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white"
-                                      style={{ background: "#982598" }}
+                                      style={{ background: "#1C352D" }}
                                       onClick={() => triggerDownload(detailControlePdf.base64, detailControlePdf.name, detailControlePdf.mimeType)}
                                     >
                                       ↓ Télécharger
@@ -3841,7 +4242,7 @@ function DashboardPage({
 
                       {/* Submit response section */}
                       <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                        <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
                           <h3 className="font-bold text-white">Réponse Contrôle</h3>
                           <p className="mt-0.5 text-xs text-white/50">Soumettez votre réponse en PDF.</p>
                         </div>
@@ -3873,15 +4274,15 @@ function DashboardPage({
                               {soumission.correction_publiee ? (
                                 <div className="space-y-2">
                                   <div className="rounded bg-app-soft p-3">
-                                    <p className="text-xs font-semibold text-app-dark/70 mb-1">{soumission.correction_titre ? `Correction â€” ${soumission.correction_titre}` : "Correction officielle"}</p>
+                                    <p className="text-xs font-semibold text-app-dark/70 mb-1">{soumission.correction_titre ? `Correction — ${soumission.correction_titre}` : "Correction officielle"}</p>
                                     <p className="text-sm text-app-dark/80 whitespace-pre-wrap">{soumission.correction_publiee}</p>
                                   </div>
                                   {/* Correction PDF viewer */}
                                   {correctionFichier[soumission.controle_id] ? (
                                     <div className="rounded-xl border border-app-muted bg-white overflow-hidden">
-                                      <div className="flex items-center justify-between px-4 py-2 border-b border-app-muted/60" style={{ background: "#15173D" }}>
-                                        <p className="text-xs font-bold text-white">Correction PDF â€” {correctionFichier[soumission.controle_id]!.name}</p>
-                                        <button type="button" onClick={() => setCorrectionFichier((prev) => ({ ...prev, [soumission.controle_id]: null }))} className="text-white/50 hover:text-white text-xs">âœ• Fermer</button>
+                                      <div className="flex items-center justify-between px-4 py-2 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
+                                        <p className="text-xs font-bold text-white">Correction PDF — {correctionFichier[soumission.controle_id]!.name}</p>
+                                        <button type="button" onClick={() => setCorrectionFichier((prev) => ({ ...prev, [soumission.controle_id]: null }))} className="text-white/50 hover:text-white text-xs">✕ Fermer</button>
                                       </div>
                                       <div className="p-3">
                                         {correctionFichier[soumission.controle_id]!.mimeType === "application/pdf" || correctionFichier[soumission.controle_id]!.name.toLowerCase().endsWith(".pdf")
@@ -3890,7 +4291,7 @@ function DashboardPage({
                                             <div className="flex items-center gap-3 p-3">
                                               <span className="text-base">ðŸ“Ž</span>
                                               <p className="flex-1 text-sm font-medium text-app-dark">{correctionFichier[soumission.controle_id]!.name}</p>
-                                              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: "#982598" }} onClick={() => triggerDownload(correctionFichier[soumission.controle_id]!.base64, correctionFichier[soumission.controle_id]!.name, correctionFichier[soumission.controle_id]!.mimeType)}>↓ Télécharger</button>
+                                              <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }} onClick={() => triggerDownload(correctionFichier[soumission.controle_id]!.base64, correctionFichier[soumission.controle_id]!.name, correctionFichier[soumission.controle_id]!.mimeType)}>↓ Télécharger</button>
                                             </div>
                                           )
                                         }
@@ -3908,7 +4309,7 @@ function DashboardPage({
                                       ) : (
                                         <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
                                       )}
-                                      {correctionFichierLoading[soumission.controle_id] ? "Chargementâ€¦" : "Voir la correction PDF"}
+                                      {correctionFichierLoading[soumission.controle_id] ? "Chargement…" : "Voir la correction PDF"}
                                     </button>
                                   )}
                                 </div>
@@ -3949,7 +4350,7 @@ function DashboardPage({
                             disabled={!submissionFiles[detailControleId]}
                             onClick={() => void handleSubmitAnswer(detailControleId)}
                             className="w-full rounded-xl px-4 py-3 text-sm font-bold text-white transition disabled:opacity-40"
-                            style={{ background: "#982598" }}
+                            style={{ background: "#1C352D" }}
                           >
                             {soumission?.has_fichier ? "Remplacer ma réponse" : "Soumettre ma réponse"}
                           </button>
@@ -3961,10 +4362,10 @@ function DashboardPage({
               </>
             ) : null}
 
-            {/* â”€â”€ SUJET FIN DE STAGE â”€â”€ */}
+            {/* ── SUJET FIN DE STAGE ── */}
             {stageaireView === "sujet" ? (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
                   <h3 className="font-bold text-white">Sujet de fin de stage</h3>
                   <p className="mt-0.5 text-xs text-white/50">Votre sujet de recherche et encadrant assigné.</p>
                 </div>
@@ -3973,7 +4374,7 @@ function DashboardPage({
                     <div className="space-y-4">
                       {/* Status badge */}
                       <div className="flex items-center gap-3">
-                        <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: stageaireData.sujet_fin_stage.etat === "EN_COURS" ? "#982598" : stageaireData.sujet_fin_stage.etat === "TERMINE" ? "#22c55e" : "#ef4444" }}>
+                        <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: stageaireData.sujet_fin_stage.etat === "EN_COURS" ? "#A6B28B" : stageaireData.sujet_fin_stage.etat === "TERMINE" ? "#22c55e" : "#ef4444" }}>
                           {stageaireData.sujet_fin_stage.etat.replace("_", " ")}
                         </span>
                         {stageaireData.sujet_fin_stage.date_affectation && (
@@ -3989,7 +4390,7 @@ function DashboardPage({
                       </div>
                       {/* Encadrant */}
                       <div className="flex items-center gap-3 rounded-xl border border-app-muted/60 bg-white px-4 py-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#15173D" }}>
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
                           {stageaireData.sujet_fin_stage.encadrant.charAt(0).toUpperCase()}
                         </div>
                         <div>
@@ -3997,10 +4398,41 @@ function DashboardPage({
                           <p className="font-semibold text-app-dark">{stageaireData.sujet_fin_stage.encadrant}</p>
                         </div>
                       </div>
+                      {/* Fichier Word partagé */}
+                      {stageaireData.sujet_fin_stage.has_fichier_word && (
+                        <div className="rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 flex items-center gap-3">
+                          <svg className="h-8 w-8 shrink-0 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-blue-600/70">Fichier Word partagé par votre encadrant</p>
+                            <p className="text-sm font-semibold text-app-dark truncate">{stageaireData.sujet_fin_stage.nom_fichier_word || "document.docx"}</p>
+                          </div>
+                          <button
+                            type="button"
+                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-90"
+                            style={{ background: "#1C352D" }}
+                            onClick={async () => {
+                              const res = await apiFetch(`/api/sujets/${stageaireData.sujet_fin_stage!.sujet_id}/fichier-word/`);
+                              if (!res.ok) return;
+                              const data = await res.json() as { fichier_base64: string; nom_fichier: string; mime_type: string };
+                              const bytes = Uint8Array.from(atob(data.fichier_base64), (c) => c.charCodeAt(0));
+                              const url = URL.createObjectURL(new Blob([bytes], { type: data.mime_type }));
+                              const a = document.createElement("a"); a.href = url; a.download = data.nom_fichier; a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            Télécharger Word
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-4 py-12 text-center">
-                      <div className="flex h-16 w-16 items-center justify-center rounded-full" style={{ background: "rgba(21,23,61,0.06)" }}>
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full" style={{ background: "rgba(28,53,45,0.06)" }}>
                         <svg className="h-8 w-8 text-app-dark/25" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                       </div>
                       <div>
@@ -4013,10 +4445,10 @@ function DashboardPage({
               </article>
             ) : null}
 
-            {/* â”€â”€ INSTALLATION & LOGICIELS â”€â”€ */}
+            {/* ── INSTALLATION & LOGICIELS ── */}
             {stageaireView === "installation_logiciels" ? (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                   <div>
                     <h3 className="font-bold text-white">Installation & Logiciels</h3>
                     <p className="mt-0.5 text-xs text-white/50">Fichiers partagés par vos instructeurs.</p>
@@ -4034,25 +4466,48 @@ function DashboardPage({
                     </div>
                   ) : installFichiers.map((f) => (
                     <div key={f.id} className="flex items-center gap-4 px-5 py-3">
-                      <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      {isZipFichier(f) ? (
+                        <svg className="h-8 w-8 shrink-0 text-orange-400" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6zM11 11h2v2h-2zm0 3h2v2h-2zm0 3h2v2h-2z"/></svg>
+                      ) : (
+                        <svg className="h-8 w-8 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/></svg>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
-                        <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                        <p className="text-xs text-app-dark/40">{f.nom_fichier} · {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
                       </div>
-                      <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white shrink-0">
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                        Télécharger
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isZipFichier(f) ? (
+                          <>
+                            <button type="button" onClick={() => void handleOpenZipModal(f)} disabled={zipLoadingId === f.id} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white disabled:opacity-50">
+                              {zipLoadingId === f.id ? (
+                                <svg className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z"/></svg>
+                              ) : (
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                              )}
+                              Voir le contenu
+                            </button>
+                            <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white">
+                              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                              ↓ ZIP complet
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" onClick={() => void handleInstallDownload(f.id, f.nom_fichier)} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-app-soft px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-white shrink-0">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                            Télécharger
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               </article>
             ) : null}
 
-            {/* â”€â”€ FEUILLE DE RÉDACTION â”€â”€ */}
+            {/* ── FEUILLE DE RÉDACTION ── */}
             {stageaireView === "feuille_redaction" ? (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                   <div>
                     <h3 className="font-bold text-white">Feuille de rédaction</h3>
                     <p className="mt-0.5 text-xs text-white/50">Fichiers partagés par l'administration.</p>
@@ -4077,7 +4532,7 @@ function DashboardPage({
                       )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
-                        <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                        <p className="text-xs text-app-dark/40">{f.nom_fichier} · {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         {f.nom_fichier.toLowerCase().endsWith(".pdf") && (
@@ -4104,107 +4559,57 @@ function DashboardPage({
 
       {user.role === "Coordinateur" && coordinateurData ? (
         <section className="mt-6 grid gap-5 md:grid-cols-[220px_1fr]">
-          {/* Sidebar */}
-          <aside className="sidebar-animated card-hover rounded-2xl border border-app-muted bg-white p-4 shadow-sm self-start">
+          {/* ── Sidebar ── */}
+          <aside className="sidebar-animated card-hover rounded-2xl border border-app-muted bg-white p-4 shadow-sm self-start sticky top-4">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-app-accent">Espace Coordinateur</p>
             <div className="mt-3 grid gap-1">
               {([
                 { key: "dashboard", label: "Tableau de bord", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /> },
+                { key: "gestion", label: "Gestion stagiaires", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /> },
                 { key: "reporting", label: "Reporting", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /> },
                 { key: "export", label: "Export données", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /> },
               ] as const).map(({ key, label, icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setCoordinateurView(key)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${coordinateurView === key ? "bg-app-dark text-white" : "text-app-dark hover:bg-app-soft"}`}
-                >
+                <button key={key} type="button" onClick={() => setCoordinateurView(key)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${coordinateurView === key ? "bg-app-dark text-white" : "text-app-dark hover:bg-app-soft"}`}>
                   <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={coordinateurView === key ? 2.5 : 2} viewBox="0 0 24 24">{icon}</svg>
                   {label}
                 </button>
               ))}
             </div>
-
-            {/* Notification badge in sidebar */}
             {coordinateurData.notifications.unread_count > 0 && (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2">
                 <svg className="h-3.5 w-3.5 shrink-0 text-amber-500" fill="currentColor" viewBox="0 0 24 24"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9m-4.27 13a2 2 0 01-3.46 0" /></svg>
                 <p className="text-xs font-semibold text-amber-700">{coordinateurData.notifications.unread_count} non lue{coordinateurData.notifications.unread_count > 1 ? "s" : ""}</p>
               </div>
             )}
-
-            {/* Quick actions */}
-            <div className="mt-5 border-t border-app-muted/60 pt-4">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-app-dark/40">Actions rapides</p>
-              <div className="grid gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setCoordinateurView("reporting")}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-app-dark hover:bg-app-soft transition text-left"
-                >
-                  <svg className="h-3.5 w-3.5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                  Voir les performances
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleExportCSV()}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-app-dark hover:bg-app-soft transition text-left"
-                >
-                  <svg className="h-3.5 w-3.5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
-                  Exporter CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleExportXLSX()}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-app-dark hover:bg-app-soft transition text-left"
-                >
-                  <svg className="h-3.5 w-3.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  Exporter Excel
-                </button>
-              </div>
-            </div>
           </aside>
 
-          {/* Main content */}
+          {/* ── Main content ── */}
           <div className="min-w-0 grid gap-5">
 
-            {/* â”€â”€ NOTIFICATION FLASH â”€â”€ */}
             {coordinateurData.notifications.unread_count > 0 && !coordNotifDismissed && (
-              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm animate-pulse-once">
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
                 <svg className="h-5 w-5 shrink-0 text-amber-500 mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-amber-800">
-                    {coordinateurData.notifications.unread_count} notification{coordinateurData.notifications.unread_count > 1 ? "s" : ""} non lue{coordinateurData.notifications.unread_count > 1 ? "s" : ""}
-                  </p>
-                  <p className="mt-0.5 text-xs text-amber-700/70">Consultez vos notifications pour rester informé des activités récentes.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setCoordNotifDismissed(true)}
-                  className="shrink-0 rounded-lg p-1 text-amber-500 transition hover:bg-amber-100"
-                  title="Fermer"
-                >
+                <p className="flex-1 text-sm font-semibold text-amber-800">{coordinateurData.notifications.unread_count} notification{coordinateurData.notifications.unread_count > 1 ? "s" : ""} non lue{coordinateurData.notifications.unread_count > 1 ? "s" : ""}</p>
+                <button type="button" onClick={() => setCoordNotifDismissed(true)} className="shrink-0 rounded-lg p-1 text-amber-500 hover:bg-amber-100">
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                 </button>
               </div>
             )}
 
-            {/* â”€â”€ DASHBOARD â”€â”€ */}
+            {/* ── TABLEAU DE BORD ── */}
             {coordinateurView === "dashboard" && (
               <>
-                {/* KPI cards */}
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                   {[
-                    { label: "Brigades", value: coordinateurData.monitoring.brigades.length, color: "#15173D", bg: "rgba(21,23,61,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /> },
-                    { label: "Stagiaires", value: coordinateurData.monitoring.stagiaires_total, color: "#15173D", bg: "rgba(21,23,61,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /> },
-                    { label: "Contrôles publiés", value: coordinateurData.monitoring.controls_published, color: "#982598", bg: "rgba(152,37,152,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /> },
+                    { label: "Stagiaires", value: coordinateurData.monitoring.stagiaires_total, color: "#1C352D", bg: "rgba(28,53,45,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /> },
+                    { label: "Contrôles publiés", value: coordinateurData.monitoring.controls_published, color: "#A6B28B", bg: "rgba(166,178,139,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /> },
+                    { label: "Réponses contrôles", value: coordinateurData.monitoring.soumissions_total, color: "#0369a1", bg: "rgba(3,105,161,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /> },
                     { label: "Notes publiées", value: coordinateurData.monitoring.notes_published, color: "#059669", bg: "rgba(5,150,105,0.07)", icon: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" /> },
                   ].map((s) => (
                     <article key={s.label} className="rounded-2xl border border-app-muted bg-white p-4 shadow-sm">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: s.bg }}>
-                          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" style={{ color: s.color }}>{s.icon}</svg>
-                        </div>
+                      <div className="flex h-9 w-9 items-center justify-center rounded-xl mb-3" style={{ background: s.bg }}>
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" style={{ color: s.color }}>{s.icon}</svg>
                       </div>
                       <p className="text-2xl font-black" style={{ color: s.color }}>{s.value}</p>
                       <p className="mt-0.5 text-xs font-semibold text-app-dark/50 uppercase tracking-wide">{s.label}</p>
@@ -4212,38 +4617,18 @@ function DashboardPage({
                   ))}
                 </div>
 
-                {/* Performance mini-chart strip */}
                 <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
                   <div className="px-6 py-4 border-b border-app-muted/60 flex items-center justify-between">
                     <div>
                       <h3 className="font-bold text-app-dark">Performance globale</h3>
                       <p className="mt-0.5 text-xs text-app-dark/50">Indicateurs clés en temps réel</p>
                     </div>
-                    <button type="button" onClick={() => setCoordinateurView("reporting")} className="text-xs font-semibold text-app-accent hover:underline">Voir le détail â†’</button>
+                    <button type="button" onClick={() => setCoordinateurView("reporting")} className="text-xs font-semibold text-app-accent hover:underline">Voir le détail →</button>
                   </div>
-                  <div className="grid grid-cols-3 divide-x divide-app-muted/40 p-0">
+                  <div className="grid grid-cols-2 divide-x divide-app-muted/40">
                     {[
-                      {
-                        label: "Taux de réussite",
-                        value: coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "â€”",
-                        pct: coordinateurData.monitoring.taux_reussite_global ?? 0,
-                        color: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b",
-                        sub: "stagiaires â‰¥ 10/20",
-                      },
-                      {
-                        label: "Note moyenne",
-                        value: coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}/20` : "â€”",
-                        pct: ((coordinateurData.monitoring.avancement_moyen ?? 0) / 20) * 100,
-                        color: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444",
-                        sub: "moyenne générale",
-                      },
-                      {
-                        label: "Évalués",
-                        value: `${coordinateurData.monitoring.brigades.reduce((s, b) => s + b.avec_notes_count, 0)}/${coordinateurData.monitoring.stagiaires_total}`,
-                        pct: coordinateurData.monitoring.stagiaires_total > 0 ? (coordinateurData.monitoring.brigades.reduce((s, b) => s + b.avec_notes_count, 0) / coordinateurData.monitoring.stagiaires_total) * 100 : 0,
-                        color: "#982598",
-                        sub: "stagiaires notés",
-                      },
+                      { label: "Taux de réussite", value: coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "—", pct: coordinateurData.monitoring.taux_reussite_global ?? 0, color: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b", sub: "stagiaires ≥ 10/20" },
+                      { label: "Note moyenne", value: coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}/20` : "—", pct: ((coordinateurData.monitoring.avancement_moyen ?? 0) / 20) * 100, color: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444", sub: "moyenne générale" },
                     ].map((kpi) => (
                       <div key={kpi.label} className="flex flex-col gap-2 p-5">
                         <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">{kpi.label}</p>
@@ -4257,130 +4642,84 @@ function DashboardPage({
                   </div>
                 </article>
 
-                {/* Brigade table with search + filters */}
+                {/* Tableau résumé stagiaires */}
                 <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
-                    <h3 className="font-bold text-white">Vue par brigade</h3>
-                    <p className="mt-0.5 text-xs text-white/50">Détail par brigade sous votre responsabilité.</p>
+                  <div className="px-6 py-4 border-b border-app-muted/60 flex items-center justify-between" style={{ background: "#1C352D" }}>
+                    <h3 className="font-bold text-white">Suivi des stagiaires</h3>
+                    <button type="button" onClick={() => setCoordinateurView("gestion")} className="text-xs font-semibold text-white/60 hover:text-white">Gérer →</button>
                   </div>
-
-                  {/* Search + filter bar */}
-                  <div className="flex flex-wrap items-center gap-3 border-b border-app-muted/40 bg-app-soft/30 px-5 py-3">
-                    {/* Search */}
-                    <div className="relative flex-1 min-w-[160px]">
-                      <svg className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-app-dark/30" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                      <input
-                        type="text"
-                        placeholder="Rechercher une brigadeâ€¦"
-                        value={brigadeSearch}
-                        onChange={(e) => setBrigadeSearch(e.target.value)}
-                        className="w-full rounded-lg border border-app-muted bg-white py-1.5 pl-8 pr-3 text-sm text-app-dark placeholder-app-dark/30 focus:outline-none focus:ring-1 focus:ring-app-accent"
-                      />
-                    </div>
-                    {/* Dynamic filters */}
-                    <div className="flex gap-1.5 flex-wrap">
-                      {([
-                        { key: "tous", label: "Toutes" },
-                        { key: "reussite", label: "En réussite â‰¥70%" },
-                        { key: "surveiller", label: "Ã€ surveiller <50%" },
-                        { key: "sans_notes", label: "Sans notes" },
-                      ] as const).map((f) => (
-                        <button
-                          key={f.key}
-                          type="button"
-                          onClick={() => setBrigadeFilter(f.key)}
-                          className="rounded-full px-3 py-1 text-xs font-semibold transition"
-                          style={{
-                            background: brigadeFilter === f.key ? "#15173D" : "rgba(21,23,61,0.06)",
-                            color: brigadeFilter === f.key ? "white" : "#15173D",
-                          }}
-                        >
-                          {f.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                   <div className="overflow-x-auto">
-                    {(() => {
-                      const filtered = coordinateurData.monitoring.brigades.filter((b) => {
-                        const matchSearch = b.brigade_code.toLowerCase().includes(brigadeSearch.toLowerCase());
-                        const matchFilter =
-                          brigadeFilter === "tous" ? true :
-                          brigadeFilter === "reussite" ? (b.taux_reussite !== null && b.taux_reussite >= 70) :
-                          brigadeFilter === "surveiller" ? (b.taux_reussite === null || b.taux_reussite < 50) :
-                          brigadeFilter === "sans_notes" ? b.published_notes_count === 0 :
-                          true;
-                        return matchSearch && matchFilter;
-                      });
-                      return (
-                        <table className="min-w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-app-muted/60 bg-app-soft/40">
-                              {["Brigade", "Classes", "Stagiaires", "Notes publiées", "Moyenne /20", "Taux réussite", "Soumissions"].map((h) => (
-                                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-app-dark/50">{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filtered.map((b) => (
-                              <tr className="border-b border-app-muted/40 hover:bg-app-soft/30 transition" key={b.brigade_code}>
-                                <td className="px-4 py-3 font-semibold text-app-dark">{b.brigade_code}</td>
-                                <td className="px-4 py-3 text-app-dark/70">{b.classes_count}</td>
-                                <td className="px-4 py-3 text-app-dark/70">{b.stagiaires_count}</td>
-                                <td className="px-4 py-3 text-app-dark/70">{b.published_notes_count}</td>
-                                <td className="px-4 py-3">
-                                  {b.note_moyenne !== null ? (
-                                    <span className="font-bold" style={{ color: b.note_moyenne >= 10 ? "#059669" : "#ef4444" }}>{b.note_moyenne}/20</span>
-                                  ) : <span className="text-app-dark/30">â€”</span>}
-                                </td>
-                                <td className="px-4 py-3">
-                                  {b.taux_reussite !== null ? (
-                                    <div className="flex items-center gap-2">
-                                      <div className="h-1.5 w-16 rounded-full bg-app-muted/30 overflow-hidden">
-                                        <div className="h-full rounded-full" style={{ width: `${b.taux_reussite}%`, background: b.taux_reussite >= 70 ? "#059669" : b.taux_reussite >= 50 ? "#f59e0b" : "#ef4444" }} />
-                                      </div>
-                                      <span className="font-bold text-xs" style={{ color: b.taux_reussite >= 70 ? "#059669" : b.taux_reussite >= 50 ? "#f59e0b" : "#ef4444" }}>{b.taux_reussite}%</span>
-                                    </div>
-                                  ) : <span className="text-app-dark/30">â€”</span>}
-                                </td>
-                                <td className="px-4 py-3 text-app-dark/70">{b.soumissions_count}</td>
-                              </tr>
-                            ))}
-                            {filtered.length === 0 && (
-                              <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-app-dark/40 italic">Aucune brigade ne correspond aux critères.</td></tr>
-                            )}
-                          </tbody>
-                        </table>
-                      );
-                    })()}
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-app-muted/60 bg-app-soft/50">
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-app-dark/50">Stagiaire</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-semibold text-app-dark/50">Réponses</th>
+                          <th className="px-4 py-2.5 text-center text-xs font-semibold text-app-dark/50">Moyenne</th>
+                          <th className="px-4 py-2.5 text-left text-xs font-semibold text-app-dark/50">Encadrant</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-app-muted/40">
+                        {coordinateurData.stagiaires_detail.slice(0, 8).map((s) => (
+                          <tr key={s.id} className="hover:bg-app-soft/30 transition">
+                            <td className="px-4 py-2.5 font-medium text-app-dark">{s.username}</td>
+                            <td className="px-4 py-2.5 text-center">
+                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">{s.soumissions_count}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-center">
+                              {s.notes_avg !== null
+                                ? <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.notes_avg >= 10 ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>{s.notes_avg}/20</span>
+                                : <span className="text-app-dark/30 text-xs">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5 text-xs text-app-dark/60">{s.encadrant ?? <span className="italic text-app-dark/30">Non assigné</span>}</td>
+                          </tr>
+                        ))}
+                        {coordinateurData.stagiaires_detail.length === 0 && (
+                          <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-app-dark/40">Aucun stagiaire.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
+                  {coordinateurData.stagiaires_detail.length > 8 && (
+                    <div className="px-6 py-3 border-t border-app-muted/40 text-center">
+                      <button type="button" onClick={() => setCoordinateurView("gestion")} className="text-xs font-semibold text-app-accent hover:underline">
+                        Voir tous les {coordinateurData.stagiaires_detail.length} stagiaires →
+                      </button>
+                    </div>
+                  )}
                 </article>
               </>
             )}
 
-            {/* â”€â”€ REPORTING â”€â”€ */}
+            {/* ── GESTION DES STAGIAIRES ── */}
+            {coordinateurView === "gestion" && (
+              <CoordGestionStagiaires
+                stagiaires={coordinateurData.stagiaires_detail}
+                apiFetch={apiFetch}
+                onRefresh={loadDashboard}
+              />
+            )}
+
+            {/* ── REPORTING ── */}
             {coordinateurView === "reporting" && (
-              <>
-                {/* Global KPI */}
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="grid gap-5">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Taux de réussite global</p>
                     <div className="mt-3 flex items-end gap-2">
                       <span className="text-4xl font-black" style={{ color: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b" }}>
-                        {coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "â€”"}
+                        {coordinateurData.monitoring.taux_reussite_global !== null ? `${coordinateurData.monitoring.taux_reussite_global}%` : "—"}
                       </span>
-                      <span className="mb-1 text-xs text-app-dark/40">stagiaires â‰¥ 10/20</span>
+                      <span className="mb-1 text-xs text-app-dark/40">stagiaires ≥ 10/20</span>
                     </div>
                     <div className="mt-3 h-2 w-full rounded-full bg-app-muted/40 overflow-hidden">
                       <div className="h-full rounded-full transition-all" style={{ width: `${coordinateurData.monitoring.taux_reussite_global ?? 0}%`, background: (coordinateurData.monitoring.taux_reussite_global ?? 0) >= 50 ? "#059669" : "#f59e0b" }} />
                     </div>
                   </article>
                   <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Avancement moyen</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Note moyenne générale</p>
                     <div className="mt-3 flex items-end gap-2">
                       <span className="text-4xl font-black" style={{ color: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444" }}>
-                        {coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}` : "â€”"}
+                        {coordinateurData.monitoring.avancement_moyen !== null ? `${coordinateurData.monitoring.avancement_moyen}` : "—"}
                       </span>
                       <span className="mb-1 text-xs text-app-dark/40">/ 20</span>
                     </div>
@@ -4388,83 +4727,65 @@ function DashboardPage({
                       <div className="h-full rounded-full transition-all" style={{ width: `${((coordinateurData.monitoring.avancement_moyen ?? 0) / 20) * 100}%`, background: (coordinateurData.monitoring.avancement_moyen ?? 0) >= 10 ? "#059669" : "#ef4444" }} />
                     </div>
                   </article>
-                  <article className="rounded-2xl border border-app-muted bg-white p-5 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Stagiaires évalués</p>
-                    <div className="mt-3 flex items-end gap-2">
-                      <span className="text-4xl font-black text-app-dark">
-                        {coordinateurData.monitoring.brigades.reduce((s, b) => s + b.avec_notes_count, 0)}
-                      </span>
-                      <span className="mb-1 text-xs text-app-dark/40">/ {coordinateurData.monitoring.stagiaires_total}</span>
-                    </div>
-                    <div className="mt-3 h-2 w-full rounded-full bg-app-muted/40 overflow-hidden">
-                      <div className="h-full rounded-full bg-app-accent transition-all" style={{ width: coordinateurData.monitoring.stagiaires_total > 0 ? `${(coordinateurData.monitoring.brigades.reduce((s, b) => s + b.avec_notes_count, 0) / coordinateurData.monitoring.stagiaires_total) * 100}%` : "0%" }} />
-                    </div>
-                  </article>
                 </div>
 
-                {/* Taux de réussite per brigade */}
-                <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-app-muted/60">
-                    <h3 className="font-bold text-app-dark">Taux de réussite par brigade</h3>
-                    <p className="mt-0.5 text-xs text-app-dark/50">% de stagiaires avec une moyenne â‰¥ 10/20</p>
-                  </div>
-                  <div className="p-5 space-y-4">
-                    {coordinateurData.monitoring.brigades.length === 0 ? (
-                      <p className="text-sm text-app-dark/40 italic text-center py-6">Aucune brigade disponible.</p>
-                    ) : coordinateurData.monitoring.brigades.map((b) => {
-                      const taux = b.taux_reussite ?? 0;
-                      const color = taux >= 70 ? "#059669" : taux >= 50 ? "#f59e0b" : "#ef4444";
-                      return (
-                        <div key={b.brigade_code}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-semibold text-app-dark">{b.brigade_code}</span>
-                            <span className="text-sm font-bold" style={{ color }}>{b.taux_reussite !== null ? `${b.taux_reussite}%` : "â€”"}</span>
-                          </div>
-                          <div className="h-3 w-full rounded-full bg-app-muted/40 overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${taux}%`, background: color }} />
-                          </div>
-                          <p className="mt-0.5 text-xs text-app-dark/40">{b.avec_notes_count} évalués sur {b.stagiaires_count} stagiaires</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </article>
-
-                {/* Avancement moyen per brigade */}
-                <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-app-muted/60">
-                    <h3 className="font-bold text-app-dark">Note moyenne par brigade</h3>
-                    <p className="mt-0.5 text-xs text-app-dark/50">Moyenne des notes publiées (/20)</p>
-                  </div>
-                  <div className="p-5 space-y-4">
-                    {coordinateurData.monitoring.brigades.length === 0 ? (
-                      <p className="text-sm text-app-dark/40 italic text-center py-6">Aucune brigade disponible.</p>
-                    ) : coordinateurData.monitoring.brigades.map((b) => {
-                      const avg = b.note_moyenne ?? 0;
-                      const pct = (avg / 20) * 100;
-                      const color = avg >= 14 ? "#059669" : avg >= 10 ? "#f59e0b" : avg > 0 ? "#ef4444" : "#9ca3af";
-                      return (
-                        <div key={b.brigade_code}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-semibold text-app-dark">{b.brigade_code}</span>
-                            <span className="text-sm font-bold" style={{ color }}>{b.note_moyenne !== null ? `${b.note_moyenne}/20` : "â€”"}</span>
-                          </div>
-                          <div className="h-3 w-full rounded-full bg-app-muted/40 overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: color }} />
-                          </div>
-                          <p className="mt-0.5 text-xs text-app-dark/40">{b.published_notes_count} note{b.published_notes_count !== 1 ? "s" : ""} publiée{b.published_notes_count !== 1 ? "s" : ""}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </article>
-              </>
+                {/* Bar chart par module */}
+                {coordinateurData.par_module.length > 0 && (
+                  <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-app-muted/60">
+                      <h3 className="font-bold text-app-dark">Avancement moyen par module</h3>
+                      <p className="mt-0.5 text-xs text-app-dark/50">Note moyenne des évaluations publiées par module</p>
+                    </div>
+                    <div className="p-6">
+                      <ResponsiveContainer width="100%" height={220}>
+                        <BarChart data={coordinateurData.par_module} margin={{ top: 4, right: 16, left: 0, bottom: 40 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                          <XAxis dataKey="module" tick={{ fontSize: 11, fill: "#6b7280" }} angle={-30} textAnchor="end" interval={0} />
+                          <YAxis domain={[0, 20]} tick={{ fontSize: 11, fill: "#6b7280" }} />
+                          <Tooltip formatter={(v: number) => [`${v}/20`, "Moyenne"]} />
+                          <Bar dataKey="notes_avg" name="Moyenne" radius={[4, 4, 0, 0]}>
+                            {coordinateurData.par_module.map((entry, idx) => (
+                              <Cell key={idx} fill={(entry.notes_avg ?? 0) >= 10 ? "#059669" : (entry.notes_avg !== null ? "#f59e0b" : "#d1d5db")} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="overflow-x-auto border-t border-app-muted/40">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-app-soft/50">
+                            <th className="px-4 py-2 text-left font-semibold text-app-dark/50">Module</th>
+                            <th className="px-4 py-2 text-center font-semibold text-app-dark/50">Cours</th>
+                            <th className="px-4 py-2 text-center font-semibold text-app-dark/50">Contrôles</th>
+                            <th className="px-4 py-2 text-center font-semibold text-app-dark/50">Moyenne</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-app-muted/30">
+                          {coordinateurData.par_module.map((m) => (
+                            <tr key={m.module} className="hover:bg-app-soft/30">
+                              <td className="px-4 py-2 font-medium text-app-dark">{m.module}</td>
+                              <td className="px-4 py-2 text-center text-app-dark/60">{m.cours_count}</td>
+                              <td className="px-4 py-2 text-center text-app-dark/60">{m.controls_count}</td>
+                              <td className="px-4 py-2 text-center">
+                                {m.notes_avg !== null
+                                  ? <span className={`font-bold ${m.notes_avg >= 10 ? "text-green-600" : "text-red-500"}`}>{m.notes_avg}/20</span>
+                                  : <span className="text-app-dark/30">—</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </article>
+                )}
+              </div>
             )}
 
-            {/* â”€â”€ EXPORT â”€â”€ */}
+            {/* ── EXPORT ── */}
             {coordinateurView === "export" && (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
+                <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
                   <h3 className="font-bold text-white">Export de données</h3>
                   <p className="mt-0.5 text-xs text-white/50">Générer un rapport complet au format CSV ou Excel.</p>
                 </div>
@@ -4472,7 +4793,7 @@ function DashboardPage({
                   <div className="rounded-xl border border-app-muted/60 bg-app-soft/40 p-4">
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-2">Contenu du rapport</p>
                     <ul className="space-y-1 text-sm text-app-dark/70">
-                      {["Brigade, classes, stagiaires par brigade", "Nombre de notes publiées et stagiaires évalués", "Note moyenne sur 20 par brigade", "Taux de réussite (â‰¥ 10/20) par brigade", "Nombre total de soumissions par brigade"].map((item) => (
+                      {["Stagiaire", "Nombre de soumissions de contrôles", "Note moyenne sur 20", "Statut (Réussi / Échec)", "Encadrant assigné", "Titre du sujet fin de stage"].map((item) => (
                         <li key={item} className="flex items-center gap-2">
                           <svg className="h-3.5 w-3.5 shrink-0 text-emerald-500" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                           {item}
@@ -4480,27 +4801,19 @@ function DashboardPage({
                       ))}
                     </ul>
                   </div>
-
                   <div className="grid gap-3 md:grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() => void handleExportCSV()}
-                      className="flex items-center justify-center gap-3 rounded-xl border-2 border-app-dark bg-white px-5 py-4 text-sm font-semibold text-app-dark transition hover:bg-app-dark hover:text-white"
-                    >
+                    <button type="button" onClick={() => void handleExportCSV()}
+                      className="flex items-center justify-center gap-3 rounded-xl border-2 border-app-dark bg-white px-5 py-4 text-sm font-semibold text-app-dark transition hover:bg-app-dark hover:text-white">
                       <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                      <span>Exporter CSV</span>
+                      Exporter CSV
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleExportXLSX()}
-                      className="flex items-center justify-center gap-3 rounded-xl border-2 border-emerald-600 bg-white px-5 py-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-600 hover:text-white"
-                    >
+                    <button type="button" onClick={() => void handleExportXLSX()}
+                      className="flex items-center justify-center gap-3 rounded-xl border-2 border-emerald-600 bg-white px-5 py-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-600 hover:text-white">
                       <svg className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                      <span>Exporter Excel (.xlsx)</span>
+                      Exporter Excel (.xlsx)
                     </button>
                   </div>
-
-                  <p className="text-xs text-app-dark/35 text-center">Le rapport inclut les données de toutes les brigades au moment du téléchargement.</p>
+                  <p className="text-xs text-app-dark/35 text-center">Une ligne par stagiaire au moment du téléchargement.</p>
                 </div>
               </article>
             )}
@@ -4517,7 +4830,7 @@ function DashboardPage({
                 {t("admin.navOverview")}
               </AdminNavButton>
 
-              {/* Users â€” collapsible */}
+              {/* Users — collapsible */}
               <div>
                 <button
                   className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${adminView === "users" ? "bg-app-dark text-white" : "border border-app-dark text-app-dark hover:bg-app-soft"}`}
@@ -4585,9 +4898,6 @@ function DashboardPage({
               <AdminNavButton active={adminView === "events"} onClick={() => { setAdminView("events"); setSelectedAdminUser(null); }}>
                 Events
               </AdminNavButton>
-              <AdminNavButton active={adminView === "classement"} onClick={() => { setAdminView("classement"); setSelectedAdminUser(null); }}>
-                Classement
-              </AdminNavButton>
               <AdminNavButton active={adminView === "fichiers_renseignement"} onClick={() => { setAdminView("fichiers_renseignement"); setSelectedAdminUser(null); }}>
                 Fichiers de renseignement
               </AdminNavButton>
@@ -4604,7 +4914,7 @@ function DashboardPage({
                   <AdminPlatformChart platform={{ ...adminData.platform, users_total: adminData.users.filter(u => u.role === "Stagiaire").length }} />
                 </PanelSection>
 
-                {/* â”€â”€ Statistiques rapides par rôle â”€â”€ */}
+                {/* ── Statistiques rapides par rôle ── */}
                 <PanelSection title="Statistiques rapides par rôle">
                   <AdminRoleChart
                     users={adminData.users}
@@ -4617,7 +4927,7 @@ function DashboardPage({
             {adminView === "users" && !selectedAdminUser ? (
               <PanelSection title="Utilisateurs">
 
-                {/* â”€â”€ Refresh bar â”€â”€ */}
+                {/* ── Refresh bar ── */}
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs text-app-dark/40">{adminData.users.length} compte(s) au total</p>
                   <button
@@ -4629,11 +4939,11 @@ function DashboardPage({
                     <svg className={`h-3.5 w-3.5 ${adminRefreshing ? "animate-spin" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    {adminRefreshing ? "Actualisationâ€¦" : "Actualiser"}
+                    {adminRefreshing ? "Actualisation…" : "Actualiser"}
                   </button>
                 </div>
 
-                {/* â”€â”€ Actions de masse â”€â”€ */}
+                {/* ── Actions de masse ── */}
                 <div className="mt-3 rounded-xl border border-app-muted bg-app-soft px-4 py-3">
                   <p className="mb-2 text-xs font-bold uppercase tracking-wide text-app-dark/50">Actions de masse</p>
                   <div className="flex flex-wrap gap-2">
@@ -4646,7 +4956,7 @@ function DashboardPage({
                         await loadDashboard();
                       }}
                     >
-                      âœ“ Activer tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
+                      ✓ Activer tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
                     </button>
                     <button
                       type="button"
@@ -4657,7 +4967,7 @@ function DashboardPage({
                         await loadDashboard();
                       }}
                     >
-                      âœ• Désactiver tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
+                      ✕ Désactiver tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
                     </button>
                     <button
                       type="button"
@@ -4686,16 +4996,16 @@ function DashboardPage({
                   </svg>
                   <input
                     className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                    placeholder="Rechercher par username, email ou rôleâ€¦"
+                    placeholder="Rechercher par username, email ou rôle…"
                     value={adminUserSearch}
                     onChange={(e) => { setAdminUserSearch(e.target.value); setAdminUsersPage(1); }}
                   />
                   {adminUserSearch ? (
-                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => { setAdminUserSearch(""); setAdminUsersPage(1); }} type="button">âœ•</button>
+                    <button className="text-app-dark/40 hover:text-app-dark" onClick={() => { setAdminUserSearch(""); setAdminUsersPage(1); }} type="button">✕</button>
                   ) : null}
                 </div>
 
-                {/* â”€â”€ Filtres avancés â”€â”€ */}
+                {/* ── Filtres avancés ── */}
                 <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-app-muted bg-app-soft px-4 py-3">
                   <p className="text-xs font-bold uppercase tracking-wide text-app-dark/50">Filtres avancés</p>
                   {/* Status filter */}
@@ -4705,7 +5015,7 @@ function DashboardPage({
                         key={s}
                         type="button"
                         className={`rounded px-3 py-1 text-xs font-semibold transition ${adminStatusFilter === s ? "text-white" : "text-app-dark/60 hover:bg-app-soft"}`}
-                        style={adminStatusFilter === s ? { background: "#15173D" } : {}}
+                        style={adminStatusFilter === s ? { background: "#1C352D" } : {}}
                         onClick={() => { setAdminStatusFilter(s); setAdminUsersPage(1); }}
                       >
                         {s === "tous" ? "Tous" : s === "actif" ? "Actifs" : "Inactifs"}
@@ -4720,8 +5030,8 @@ function DashboardPage({
                       value={adminUserSort}
                       onChange={(e) => { setAdminUserSort(e.target.value as "az" | "za" | "recent"); setAdminUsersPage(1); }}
                     >
-                      <option value="az">A â†’ Z</option>
-                      <option value="za">Z â†’ A</option>
+                      <option value="az">A → Z</option>
+                      <option value="za">Z → A</option>
                       <option value="recent">Plus récents</option>
                     </select>
                   </div>
@@ -4778,7 +5088,7 @@ function DashboardPage({
                         <span>
                           {totalFiltered === 0
                             ? "Aucun résultat"
-                            : `Affichage ${pageStart + 1}â€“${Math.min(pageEnd, totalFiltered)} sur ${totalFiltered} utilisateur${totalFiltered > 1 ? "s" : ""}`}
+                            : `Affichage ${pageStart + 1}–${Math.min(pageEnd, totalFiltered)} sur ${totalFiltered} utilisateur${totalFiltered > 1 ? "s" : ""}`}
                         </span>
                         {adminUserSearch && totalFiltered === 0 && (
                           <span className="text-app-dark/40">Aucun résultat pour « {adminUserSearch} »</span>
@@ -4789,7 +5099,7 @@ function DashboardPage({
                         {roleOrder.filter((rg) => groups[rg].length > 0).map((roleGroup) => (
                           <div key={roleGroup} className="overflow-hidden rounded-xl border border-app-muted">
                             {/* Group header */}
-                            <div className="flex items-center justify-between px-4 py-2.5 text-white" style={{ background: "#15173D" }}>
+                            <div className="flex items-center justify-between px-4 py-2.5 text-white" style={{ background: "#1C352D" }}>
                               <span className="text-sm font-bold uppercase tracking-wide">{roleGroup}s</span>
                               <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-bold">{groups[roleGroup].length}</span>
                             </div>
@@ -4800,13 +5110,13 @@ function DashboardPage({
                                 return (
                                   <div key={`user-${u.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3">
                                     {/* Avatar */}
-                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: "#15173D" }}>
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white" style={{ background: "#1C352D" }}>
                                       {u.username[0]?.toUpperCase()}
                                     </div>
                                     {/* Info */}
                                     <div className="min-w-0 flex-1">
                                       <p className="truncate text-sm font-semibold text-app-dark">{u.username}</p>
-                                      <p className="truncate text-xs text-app-dark/50">{u.email || "â€”"}</p>
+                                      <p className="truncate text-xs text-app-dark/50">{u.email || "—"}</p>
                                     </div>
                                     {/* Status */}
                                     <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${u.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
@@ -4816,7 +5126,7 @@ function DashboardPage({
                                     {rps.saved && (
                                       <span className="flex items-center gap-1 rounded bg-green-50 px-2 py-0.5 font-mono text-xs text-green-800">
                                         {rps.saved}
-                                        <button className="text-green-600 hover:text-green-800" onClick={() => navigator.clipboard.writeText(rps.saved)} type="button">âŽ˜</button>
+                                        <button className="text-green-600 hover:text-green-800" onClick={() => navigator.clipboard.writeText(rps.saved)} type="button">⎘</button>
                                       </span>
                                     )}
                                     {/* Password reset inline */}
@@ -4848,7 +5158,7 @@ function DashboardPage({
                                         }}
                                         type="button"
                                       >
-                                        âœ“
+                                        ✓
                                       </button>
                                     </div>
                                     {/* Send password by email */}
@@ -4861,8 +5171,8 @@ function DashboardPage({
                                           disabled={!u.email || es === "loading"}
                                           className="shrink-0 flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold transition disabled:opacity-40"
                                           style={{
-                                            background: es === "sent" ? "rgba(34,197,94,0.12)" : es === "error" || es === "no_email" ? "rgba(239,68,68,0.1)" : "rgba(21,23,61,0.07)",
-                                            color: es === "sent" ? "#16a34a" : es === "error" || es === "no_email" ? "#dc2626" : "#15173D",
+                                            background: es === "sent" ? "rgba(34,197,94,0.12)" : es === "error" || es === "no_email" ? "rgba(239,68,68,0.1)" : "rgba(28,53,45,0.07)",
+                                            color: es === "sent" ? "#16a34a" : es === "error" || es === "no_email" ? "#dc2626" : "#1C352D",
                                           }}
                                           onClick={async () => {
                                             setEmailResetState((prev) => ({ ...prev, [u.id]: "loading" }));
@@ -4911,7 +5221,7 @@ function DashboardPage({
                         )}
                       </div>
 
-                      {/* â”€â”€ Pagination â”€â”€ */}
+                      {/* ── Pagination ── */}
                       {totalPages > 1 && (
                         <div className="mt-5 flex items-center justify-between gap-2">
                           <button
@@ -4920,7 +5230,7 @@ function DashboardPage({
                             className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft disabled:opacity-40"
                             onClick={() => setAdminUsersPage((p) => Math.max(1, p - 1))}
                           >
-                            â† Précédent
+                            ← Précédent
                           </button>
                           <div className="flex items-center gap-1">
                             {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
@@ -4928,7 +5238,7 @@ function DashboardPage({
                                 key={pg}
                                 type="button"
                                 className={`h-7 w-7 rounded text-xs font-semibold transition ${safePage === pg ? "text-white" : "text-app-dark/60 hover:bg-app-soft"}`}
-                                style={safePage === pg ? { background: "#982598" } : {}}
+                                style={safePage === pg ? { background: "#A6B28B" } : {}}
                                 onClick={() => setAdminUsersPage(pg)}
                               >
                                 {pg}
@@ -4941,7 +5251,7 @@ function DashboardPage({
                             className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft disabled:opacity-40"
                             onClick={() => setAdminUsersPage((p) => Math.min(totalPages, p + 1))}
                           >
-                            Suivant â†’
+                            Suivant →
                           </button>
                         </div>
                       )}
@@ -4982,7 +5292,7 @@ function DashboardPage({
                 />
 
                 {adminView !== "bulk_csv" && <>
-                <SubCard title="Creation unitaire">
+                <SubCard title="Création de compte">
                   <form className="mt-3 grid gap-3 md:grid-cols-2" onSubmit={handleCreateAccount}>
                     <Input
                       label="Username"
@@ -5065,11 +5375,11 @@ function DashboardPage({
                     {!(accountForm.role === "Instructeur" && accountForm.est_civil) && accountForm.role !== "Admin" ? (
                       <>
                         <label className="grid gap-1 text-sm font-medium text-app-dark">
-                          Corp
+                          Arme
                           <select
                             className="rounded-md border border-app-muted bg-white px-3 py-2 outline-none focus:border-app-accent"
                             onChange={(event) =>
-                              setAccountForm((prev) => ({ ...prev, corps_id: event.target.value, rank_id: "", speciality_id: "" }))
+                              setAccountForm((prev) => ({ ...prev, corps_id: event.target.value, rank_id: "" }))
                             }
                             required
                             value={accountForm.corps_id}
@@ -5080,42 +5390,6 @@ function DashboardPage({
                                 {corp.label}
                               </option>
                             ))}
-                          </select>
-                        </label>
-                        <label className="grid gap-1 text-sm font-medium text-app-dark">
-                          Rank
-                          <select
-                            className="rounded-md border border-app-muted bg-white px-3 py-2 outline-none focus:border-app-accent"
-                            onChange={(event) => setAccountForm((prev) => ({ ...prev, rank_id: event.target.value }))}
-                            required
-                            value={accountForm.rank_id}
-                          >
-                            <option value="">Selectionner</option>
-                            {referencesData.ranks
-                              .filter((rank) => rank.corps_id === accountForm.corps_id)
-                              .map((rank) => (
-                                <option key={rank.id} value={rank.id}>
-                                  {rank.label}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
-                        <label className="grid gap-1 text-sm font-medium text-app-dark">
-                          Speciality
-                          <select
-                            className="rounded-md border border-app-muted bg-white px-3 py-2 outline-none focus:border-app-accent"
-                            onChange={(event) => setAccountForm((prev) => ({ ...prev, speciality_id: event.target.value }))}
-                            required
-                            value={accountForm.speciality_id}
-                          >
-                            <option value="">Selectionner</option>
-                            {referencesData.specialities
-                              .filter((s) => !s.corps_id || s.corps_id === accountForm.corps_id)
-                              .map((speciality) => (
-                                <option key={speciality.id} value={speciality.id}>
-                                  {speciality.label}
-                                </option>
-                              ))}
                           </select>
                         </label>
                       </>
@@ -5134,7 +5408,7 @@ function DashboardPage({
                         className="text-green-600 hover:text-green-800"
                         onClick={() => setLastCreatedAccount(null)}
                       >
-                        âœ•
+                        ✕
                       </button>
                     </div>
                     <div className="grid gap-2 text-sm">
@@ -5169,31 +5443,6 @@ function DashboardPage({
                   <p className="mt-1 text-xs text-app-dark/50">
                     Roles valides: Instructeur, Stagiaire, Coordinateur, Admin. Pour Instructeur civil: est_civil=true, laisser corps/rank/speciality vides.
                   </p>
-                  {referencesData.corps.length > 0 && (
-                    <details className="mt-3 text-xs">
-                      <summary className="cursor-pointer font-semibold text-app-dark/70">IDs de reference (corps / ranks / specialites)</summary>
-                      <div className="mt-2 grid gap-2">
-                        <div>
-                          <p className="font-semibold text-app-dark/60">Corps</p>
-                          {referencesData.corps.map((c) => (
-                            <p key={c.id} className="font-mono text-app-dark/50">{c.id} â€” {c.label}</p>
-                          ))}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-app-dark/60">Ranks</p>
-                          {referencesData.ranks.map((r) => (
-                            <p key={r.id} className="font-mono text-app-dark/50">{r.id} â€” {r.label} ({referencesData.corps.find((c) => c.id === r.corps_id)?.label ?? r.corps_id})</p>
-                          ))}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-app-dark/60">Specialites</p>
-                          {referencesData.specialities.map((s) => (
-                            <p key={s.id} className="font-mono text-app-dark/50">{s.id} â€” {s.label}</p>
-                          ))}
-                        </div>
-                      </div>
-                    </details>
-                  )}
                   <form className="mt-3 grid gap-3" onSubmit={handleBulkCsvUpload}>
                     <input
                       id="accounts-csv-input"
@@ -5299,12 +5548,12 @@ function DashboardPage({
                           </svg>
                           <input
                             className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                            placeholder="Rechercher un contrôleâ€¦"
+                            placeholder="Rechercher un contrôle…"
                             value={adminControlSearch}
                             onChange={(e) => setAdminControlSearch(e.target.value)}
                           />
                           {adminControlSearch ? (
-                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminControlSearch("")} type="button">âœ•</button>
+                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminControlSearch("")} type="button">✕</button>
                           ) : null}
                         </div>
                         <div className="mt-3 space-y-2">
@@ -5366,12 +5615,12 @@ function DashboardPage({
                           </svg>
                           <input
                             className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                            placeholder="Rechercher un coursâ€¦"
+                            placeholder="Rechercher un cours…"
                             value={adminCoursSearch}
                             onChange={(e) => setAdminCoursSearch(e.target.value)}
                           />
                           {adminCoursSearch ? (
-                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminCoursSearch("")} type="button">âœ•</button>
+                            <button className="text-app-dark/40 hover:text-app-dark" onClick={() => setAdminCoursSearch("")} type="button">✕</button>
                           ) : null}
                         </div>
                         <div className="mt-3 space-y-2">
@@ -5431,93 +5680,6 @@ function DashboardPage({
                 handleDeleteRank={handleDeleteRank}
                 handleDeleteSpeciality={handleDeleteSpeciality}
               />
-            ) : null}
-
-            {adminView === "classement" ? (
-              <div className="grid gap-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold text-app-dark">Classement des stagiaires</h2>
-                    <p className="text-xs text-app-dark/40 mt-0.5">Classement par moyenne des notes publiées, par classe.</p>
-                  </div>
-                  <button type="button" onClick={() => void loadAdminClassement()} className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark hover:bg-app-soft transition">
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                    Actualiser
-                  </button>
-                </div>
-                {!adminClassementData ? (
-                  <div className="flex items-center justify-center py-16">
-                    <svg className="h-6 w-6 animate-spin text-app-accent" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" /></svg>
-                  </div>
-                ) : adminClassementData.classes.length === 0 ? (
-                  <div className="rounded-2xl border border-app-muted bg-white p-10 text-center">
-                    <p className="text-sm text-app-dark/40">Aucune classe avec des stagiaires actifs.</p>
-                  </div>
-                ) : adminClassementData.classes.map((cls) => (
-                  <div key={`admin-cls-${cls.classe_code}`} className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-app-muted/60" style={{ background: "#15173D" }}>
-                      <div>
-                        <p className="font-bold text-white">{cls.classe_label || cls.classe_code}</p>
-                        <p className="text-xs text-white/50">{cls.total} stagiaire(s)</p>
-                      </div>
-                      {(() => {
-                        const noted = cls.leaderboard.filter(e => e.moyenne != null);
-                        const avg = noted.length > 0 ? noted.reduce((s, e) => s + (e.moyenne ?? 0), 0) / noted.length : null;
-                        return avg != null ? (
-                          <span className="rounded-full px-3 py-1 text-sm font-black text-white" style={{ background: avg >= 10 ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)" }}>
-                            Moy. classe : {avg.toFixed(2)}/20
-                          </span>
-                        ) : <span className="text-xs text-white/40">Aucune note</span>;
-                      })()}
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-app-muted/60 text-left text-xs font-semibold uppercase tracking-wide text-app-dark/40">
-                            <th className="px-5 py-3 w-14">Rang</th>
-                            <th className="px-4 py-3">Stagiaire</th>
-                            <th className="px-4 py-3 text-right">Moyenne</th>
-                            <th className="px-4 py-3 text-right">Notes</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cls.leaderboard.map((entry, idx) => {
-                            const medal = entry.rank === 1 ? "ðŸ¥‡" : entry.rank === 2 ? "ðŸ¥ˆ" : entry.rank === 3 ? "ðŸ¥‰" : null;
-                            return (
-                              <tr key={`admin-entry-${idx}`} className="border-b border-app-muted/40 last:border-0 hover:bg-app-soft/40 transition">
-                                <td className="px-5 py-3 text-center">
-                                  {medal ? <span className="text-lg">{medal}</span> : <span className="text-sm font-bold text-app-dark/60">{entry.rank ?? "â€”"}</span>}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white" style={{ background: "#15173D" }}>
-                                      {entry.username[0]?.toUpperCase()}
-                                    </div>
-                                    <span className="font-medium text-app-dark">{entry.username}</span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                  {entry.moyenne != null ? (
-                                    <div className="flex flex-col items-end gap-1">
-                                      <span className="font-black text-sm" style={{ color: entry.moyenne >= 10 ? "#16a34a" : "#dc2626" }}>{entry.moyenne}/20</span>
-                                      <div className="h-1.5 w-20 rounded-full bg-app-muted overflow-hidden">
-                                        <div className="h-full rounded-full" style={{ width: `${(entry.moyenne / 20) * 100}%`, background: entry.moyenne >= 10 ? "#22c55e" : "#ef4444" }} />
-                                      </div>
-                                    </div>
-                                  ) : <span className="text-xs italic text-app-dark/30">Non noté</span>}
-                                </td>
-                                <td className="px-4 py-3 text-right">
-                                  <span className="rounded-full bg-app-soft px-2 py-0.5 text-xs font-semibold text-app-dark/60">{entry.evaluations_count}</span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
-              </div>
             ) : null}
 
             {adminView === "fichiers_renseignement" ? (
@@ -5614,7 +5776,7 @@ function DashboardPage({
                                     </button>
                                   </div>
                                 ) : (
-                                  <span className="text-xs text-app-dark/40">â€”</span>
+                                  <span className="text-xs text-app-dark/40">—</span>
                                 )}
                               </td>
                             </tr>
@@ -5627,7 +5789,7 @@ function DashboardPage({
               </div>
             ) : null}
 
-            {/* â”€â”€ Preview modal â”€â”€ */}
+            {/* ── Preview modal ── */}
             {adminPreviewFichier && (
               <div
                 className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
@@ -5692,7 +5854,7 @@ function DashboardPage({
               <div className="grid gap-6">
                 {/* Upload form */}
                 <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                  <div className="flex items-center gap-3 border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                  <div className="flex items-center gap-3 border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                     <svg className="h-4 w-4 text-white/70" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                     <p className="font-bold text-white">Partager une feuille de rédaction</p>
                   </div>
@@ -5701,7 +5863,7 @@ function DashboardPage({
                       <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Titre (optionnel)</label>
                       <input
                         className="rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
-                        placeholder="Ex : Feuille de rédaction â€” Session 2026â€¦"
+                        placeholder="Ex : Feuille de rédaction — Session 2026…"
                         value={feuilleRUploadTitre}
                         onChange={(e) => setFeuilleRUploadTitre(e.target.value)}
                       />
@@ -5710,7 +5872,7 @@ function DashboardPage({
                       <label className="text-xs font-semibold uppercase tracking-wide text-app-dark/50">Fichier Word ou PDF (.doc, .docx, .pdf)</label>
                       <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-dashed border-app-muted bg-app-soft px-4 py-3 transition hover:border-app-accent hover:bg-white">
                         <svg className="h-5 w-5 shrink-0 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                        <span className="text-sm text-app-dark/60">{feuilleRUploadFile ? feuilleRUploadFile.name : "Choisir un fichier Word ou PDFâ€¦"}</span>
+                        <span className="text-sm text-app-dark/60">{feuilleRUploadFile ? feuilleRUploadFile.name : "Choisir un fichier Word ou PDF…"}</span>
                         <input type="file" accept=".doc,.docx,.pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf" className="hidden" onChange={(e) => setFeuilleRUploadFile(e.target.files?.[0] ?? null)} />
                       </label>
                     </div>
@@ -5719,21 +5881,21 @@ function DashboardPage({
                       disabled={!feuilleRUploadFile || feuilleRUploading}
                       onClick={() => void handleFeuilleRUpload()}
                       className="flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
-                      style={{ background: "#15173D" }}
+                      style={{ background: "#1C352D" }}
                     >
                       {feuilleRUploading ? (
                         <svg className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" /></svg>
                       ) : (
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
                       )}
-                      {feuilleRUploading ? "Envoi en coursâ€¦" : "Partager le fichier"}
+                      {feuilleRUploading ? "Envoi en cours…" : "Partager le fichier"}
                     </button>
                   </div>
                 </div>
 
                 {/* Files list */}
                 <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                  <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#15173D" }}>
+                  <div className="flex items-center justify-between border-b border-app-muted px-6 py-4" style={{ background: "#1C352D" }}>
                     <p className="font-bold text-white">Fichiers partagés</p>
                     <div className="flex items-center gap-2">
                       <span className="rounded-full bg-white/20 px-3 py-0.5 text-xs font-bold text-white">{feuilleRFichiers.length}</span>
@@ -5758,7 +5920,7 @@ function DashboardPage({
                         )}
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-app-dark truncate">{f.titre}</p>
-                          <p className="text-xs text-app-dark/40">{f.nom_fichier} Â· {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
+                          <p className="text-xs text-app-dark/40">{f.nom_fichier} · {new Date(f.uploaded_at).toLocaleDateString("fr-FR")}</p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           {f.nom_fichier.toLowerCase().endsWith(".pdf") && (
@@ -5858,18 +6020,18 @@ function DashboardPage({
                 </nav>
 
                 {adminModulesLoading ? (
-                  <p className="text-sm text-app-dark/50">Chargementâ€¦</p>
+                  <p className="text-sm text-app-dark/50">Chargement…</p>
                 ) : adminSelectedBrochure ? (
-                  /* â”€â”€ Brochure: cours list â”€â”€ */
+                  /* ── Brochure: cours list ── */
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                     <div className="flex items-center gap-3 flex-wrap mb-4">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours â€” {adminSelectedBrochure.nom}</p>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40">Cours — {adminSelectedBrochure.nom}</p>
                     </div>
                     {adminSelectedBrochure.cours.length > 0 ? (
                       <div className="grid gap-3 md:grid-cols-2">
                         {adminSelectedBrochure.cours.map((c) => (
                           <div key={c.id} className="flex items-start gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(166,178,139,0.1)" }}>
                               <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /><path strokeLinecap="round" strokeLinejoin="round" d="M14 2v6h6M16 13H8M16 17H8M10 9H8" /></svg>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -5885,9 +6047,9 @@ function DashboardPage({
                     )}
                   </article>
                 ) : adminSelectedMatiere ? (
-                  /* â”€â”€ Matiere: brochures list â”€â”€ */
+                  /* ── Matiere: brochures list ── */
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures â€” {adminSelectedMatiere.nom}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Brochures — {adminSelectedMatiere.nom}</p>
                     {adminSelectedMatiere.brochures.length > 0 ? (
                       <div className="grid gap-3 md:grid-cols-2">
                         {adminSelectedMatiere.brochures.map((b) => (
@@ -5898,7 +6060,7 @@ function DashboardPage({
                               });
                             }}
                             className="group flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(21,23,61,0.08)" }}>
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(28,53,45,0.08)" }}>
                               <svg className="h-4 w-4 text-app-dark" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" /></svg>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -5906,7 +6068,7 @@ function DashboardPage({
                               <p className="mt-0.5 text-xs text-app-dark/50">{b.cours_count} cours</p>
                             </div>
                             {b.cours_count > 0 ? (
-                              <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#15173D" }}>{b.cours_count}</span>
+                              <span className="shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold text-white" style={{ background: "#1C352D" }}>{b.cours_count}</span>
                             ) : (
                               <span className="shrink-0 rounded-full bg-app-muted/50 px-2 py-0.5 text-xs text-app-dark/40">0</span>
                             )}
@@ -5918,7 +6080,7 @@ function DashboardPage({
                     )}
                   </article>
                 ) : adminSelectedModule ? (
-                  /* â”€â”€ Module: matieres list â”€â”€ */
+                  /* ── Module: matieres list ── */
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">{adminSelectedModule.nom}</p>
                     {adminSelectedModule.matieres.length > 0 ? (
@@ -5931,7 +6093,7 @@ function DashboardPage({
                               });
                             }}
                             className="group flex items-center gap-3 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
-                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(152,37,152,0.1)" }}>
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: "rgba(166,178,139,0.1)" }}>
                               <svg className="h-4 w-4 text-app-accent" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -5947,7 +6109,7 @@ function DashboardPage({
                     )}
                   </article>
                 ) : (
-                  /* â”€â”€ Modules list â”€â”€ */
+                  /* ── Modules list ── */
                   <article className="rounded-2xl border border-app-muted bg-white p-6 shadow-sm">
                     <p className="text-xs font-semibold uppercase tracking-wider text-app-dark/40 mb-4">Modules de formation</p>
                     {adminModules.length === 0 ? (
@@ -5957,7 +6119,7 @@ function DashboardPage({
                         {adminModules.map((m) => (
                           <button key={m.id} type="button" onClick={() => setAdminSelectedModule(m)}
                             className="group flex items-center gap-4 rounded-xl border border-app-muted bg-app-soft/40 p-4 text-left transition hover:border-app-dark/30 hover:bg-white hover:shadow-sm">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#15173D" }}>
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={{ background: "#1C352D" }}>
                               <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg>
                             </div>
                             <div className="min-w-0 flex-1">
@@ -5974,359 +6136,6 @@ function DashboardPage({
               </div>
             ) : null}
 
-            {adminView === "classes" ? (
-              <div className="grid gap-6">
-
-                {/* â”€â”€ Créer une classe â”€â”€ */}
-                <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                  <div className="flex items-center gap-3 border-b border-app-muted px-5 py-4" style={{ background: "#15173D" }}>
-                    <span className="text-base font-bold text-white">Créer une classe</span>
-                  </div>
-                  <form className="flex gap-3 p-5" onSubmit={handleCreateClass}>
-                    <input
-                      className="flex-1 rounded-xl border border-app-muted bg-app-soft px-4 py-2.5 text-sm outline-none focus:border-app-accent focus:ring-2 focus:ring-app-accent/20"
-                      placeholder="Nom de la classe (ex : Classe Alpha)"
-                      value={newClassForm.libelle}
-                      onChange={(e) => setNewClassForm({ libelle: e.target.value })}
-                    />
-                    <button
-                      className="rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-40"
-                      style={{ background: "#982598" }}
-                      type="submit"
-                      disabled={!newClassForm.libelle.trim()}
-                    >
-                      + Créer
-                    </button>
-                  </form>
-                </div>
-
-                {/* â”€â”€ Gestion des affectations â”€â”€ */}
-                <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                  <div className="flex items-center gap-3 border-b border-app-muted px-5 py-4" style={{ background: "#15173D" }}>
-                    <span className="text-base font-bold text-white">Gestion des affectations</span>
-                    {selectedClassId && (
-                      <span className="ml-auto rounded-full bg-white/20 px-3 py-0.5 text-xs font-semibold text-white">
-                        {classesData.find((c) => c.id === selectedClassId)?.code ?? ""}
-                      </span>
-                    )}
-                  </div>
-                  <div className="p-5 grid gap-5">
-
-                    {/* Class pill selector */}
-                    <div>
-                      <p className="mb-2 text-xs font-bold uppercase tracking-wide text-app-dark/50">Sélectionner une classe</p>
-                      {classesData.length === 0 ? (
-                        <p className="text-sm text-app-dark/40">Aucune classe créée.</p>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {classesData.map((c) => {
-                            const isSelected = selectedClassId === c.id;
-                            return (
-                              <button
-                                key={c.id}
-                                type="button"
-                                onClick={() => setSelectedClassId(c.id)}
-                                className="flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition"
-                                style={
-                                  isSelected
-                                    ? { background: "#15173D", borderColor: "#15173D", color: "white" }
-                                    : { background: "#F1E9E9", borderColor: "#E491C9", color: "#15173D" }
-                                }
-                              >
-                                <span>{c.code}</span>
-                                <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style={isSelected ? { background: "rgba(255,255,255,0.2)" } : { background: "#E491C9", color: "#15173D" }}>
-                                  {c.brigade.code}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Two columns: Stagiaires | Instructeurs */}
-                    <div className="grid gap-4 md:grid-cols-2">
-
-                      {/* â”€â”€ Stagiaires multi-select â”€â”€ */}
-                      {(() => {
-                        const allStags = adminData.users.filter((u) => u.role === "Stagiaire");
-                        const filteredStags = allStags.filter((u) => u.username.toLowerCase().includes(stagSearch.toLowerCase()));
-                        const allChecked = filteredStags.length > 0 && filteredStags.every((u) => selectedStageaireIds.includes(u.id));
-                        return (
-                          <div className="flex flex-col rounded-xl border border-app-muted overflow-hidden">
-                            {/* Header */}
-                            <div className="flex items-center justify-between px-4 py-3 border-b border-app-muted" style={{ background: "#F1E9E9" }}>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-app-dark">Stagiaires</span>
-                                <span className="rounded-full bg-app-accent px-2 py-0.5 text-[10px] font-bold text-white">{selectedStageaireIds.length}/{allStags.length}</span>
-                              </div>
-                              <button
-                                type="button"
-                                className="text-xs font-semibold text-app-accent"
-                                onClick={() =>
-                                  allChecked
-                                    ? setSelectedStageaireIds((prev) => prev.filter((id) => !filteredStags.some((u) => u.id === id)))
-                                    : setSelectedStageaireIds((prev) => [...new Set([...prev, ...filteredStags.map((u) => u.id)])])
-                                }
-                              >
-                                {allChecked ? "Désélectionner tout" : "Tout sélectionner"}
-                              </button>
-                            </div>
-                            {/* Search */}
-                            <div className="flex items-center gap-2 border-b border-app-muted px-3 py-2 bg-white">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0 text-app-dark/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                              </svg>
-                              <input
-                                className="w-full bg-transparent text-xs outline-none placeholder:text-app-dark/30"
-                                placeholder="Rechercher stagiaireâ€¦"
-                                value={stagSearch}
-                                onChange={(e) => setStagSearch(e.target.value)}
-                              />
-                              {stagSearch && <button type="button" className="text-app-dark/30 hover:text-app-dark text-xs" onClick={() => setStagSearch("")}>âœ•</button>}
-                            </div>
-                            {/* List */}
-                            <div className="max-h-52 overflow-y-auto bg-white divide-y divide-app-muted/30">
-                              {filteredStags.length === 0 && <p className="px-4 py-3 text-xs text-app-dark/40">Aucun stagiaire{stagSearch ? ` pour « ${stagSearch} »` : ""}.</p>}
-                              {filteredStags.map((u) => {
-                                const checked = selectedStageaireIds.includes(u.id);
-                                return (
-                                  <label key={`stag-sel-${u.id}`} className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 transition ${checked ? "bg-app-soft" : "hover:bg-app-soft/60"}`}>
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      className="h-4 w-4 rounded accent-app-accent"
-                                      onChange={() => setSelectedStageaireIds((prev) => checked ? prev.filter((id) => id !== u.id) : [...prev, u.id])}
-                                    />
-                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "#982598" }}>
-                                      {u.username[0]?.toUpperCase()}
-                                    </div>
-                                    <span className="flex-1 text-xs font-medium text-app-dark">{u.username}</span>
-                                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${u.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-500"}`}>
-                                      {u.is_active ? "Actif" : "Inactif"}
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                            {/* Footer */}
-                            <div className="border-t border-app-muted px-4 py-3 bg-white">
-                              <button
-                                type="button"
-                                className="w-full rounded-lg py-2 text-sm font-bold text-white transition disabled:opacity-40"
-                                style={{ background: "#982598" }}
-                                disabled={selectedStageaireIds.length === 0 || !selectedClassId}
-                                onClick={() => void handleAssignStageaireToClass()}
-                              >
-                                Assigner {selectedStageaireIds.length > 0 ? `${selectedStageaireIds.length} stagiaire(s)` : "stagiaires"}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* â”€â”€ Instructeurs multi-select â”€â”€ */}
-                      {(() => {
-                        const allInstrs = adminData.users.filter((u) => u.role === "Instructeur");
-                        const filteredInstrs = allInstrs.filter((u) => u.username.toLowerCase().includes(instrSearch.toLowerCase()));
-                        const allChecked = filteredInstrs.length > 0 && filteredInstrs.every((u) => selectedInstructeurIds.includes(u.id));
-                        return (
-                          <div className="flex flex-col rounded-xl border border-app-muted overflow-hidden">
-                            {/* Header */}
-                            <div className="flex items-center justify-between px-4 py-3 border-b border-app-muted" style={{ background: "#F1E9E9" }}>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-app-dark">Instructeurs</span>
-                                <span className="rounded-full bg-app-accent px-2 py-0.5 text-[10px] font-bold text-white">{selectedInstructeurIds.length}/{allInstrs.length}</span>
-                              </div>
-                              <button
-                                type="button"
-                                className="text-xs font-semibold text-app-accent"
-                                onClick={() =>
-                                  allChecked
-                                    ? setSelectedInstructeurIds((prev) => prev.filter((id) => !filteredInstrs.some((u) => u.id === id)))
-                                    : setSelectedInstructeurIds((prev) => [...new Set([...prev, ...filteredInstrs.map((u) => u.id)])])
-                                }
-                              >
-                                {allChecked ? "Désélectionner tout" : "Tout sélectionner"}
-                              </button>
-                            </div>
-                            {/* Search */}
-                            <div className="flex items-center gap-2 border-b border-app-muted px-3 py-2 bg-white">
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 shrink-0 text-app-dark/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                              </svg>
-                              <input
-                                className="w-full bg-transparent text-xs outline-none placeholder:text-app-dark/30"
-                                placeholder="Rechercher instructeurâ€¦"
-                                value={instrSearch}
-                                onChange={(e) => setInstrSearch(e.target.value)}
-                              />
-                              {instrSearch && <button type="button" className="text-app-dark/30 hover:text-app-dark text-xs" onClick={() => setInstrSearch("")}>âœ•</button>}
-                            </div>
-                            {/* List */}
-                            <div className="max-h-52 overflow-y-auto bg-white divide-y divide-app-muted/30">
-                              {filteredInstrs.length === 0 && <p className="px-4 py-3 text-xs text-app-dark/40">Aucun instructeur{instrSearch ? ` pour « ${instrSearch} »` : ""}.</p>}
-                              {filteredInstrs.map((u) => {
-                                const checked = selectedInstructeurIds.includes(u.id);
-                                return (
-                                  <label key={`instr-sel-${u.id}`} className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 transition ${checked ? "bg-app-soft" : "hover:bg-app-soft/60"}`}>
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      className="h-4 w-4 rounded accent-app-accent"
-                                      onChange={() => setSelectedInstructeurIds((prev) => checked ? prev.filter((id) => id !== u.id) : [...prev, u.id])}
-                                    />
-                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: "#982598" }}>
-                                      {u.username[0]?.toUpperCase()}
-                                    </div>
-                                    <span className="flex-1 text-xs font-medium text-app-dark">{u.username}</span>
-                                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${u.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-500"}`}>
-                                      {u.is_active ? "Actif" : "Inactif"}
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                            {/* Footer */}
-                            <div className="border-t border-app-muted px-4 py-3 bg-white">
-                              <button
-                                type="button"
-                                className="w-full rounded-lg py-2 text-sm font-bold text-white transition disabled:opacity-40"
-                                style={{ background: "#982598" }}
-                                disabled={selectedInstructeurIds.length === 0 || !selectedClassId}
-                                onClick={() => void handleAssignInstructeurToClass()}
-                              >
-                                Assigner {selectedInstructeurIds.length > 0 ? `${selectedInstructeurIds.length} instructeur(s)` : "instructeurs"}
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </div>
-
-                {/* â”€â”€ Liste des classes â”€â”€ */}
-                <div className="overflow-hidden rounded-2xl border border-app-muted bg-white shadow-sm">
-                  <div className="flex items-center justify-between border-b border-app-muted px-5 py-4" style={{ background: "#15173D" }}>
-                    <span className="text-base font-bold text-white">Classes créées</span>
-                    <span className="rounded-full bg-white/20 px-3 py-0.5 text-xs font-bold text-white">{classesData.length}</span>
-                  </div>
-                  <div className="p-5 grid gap-4 md:grid-cols-2">
-                    {classesData.length === 0 && <p className="col-span-2 py-6 text-center text-sm text-app-dark/40">Aucune classe créée.</p>}
-                    {classesData.map((c) => (
-                      <div
-                        key={c.id}
-                        className={`rounded-xl border-2 p-4 transition ${selectedClassId === c.id ? "border-app-accent bg-app-soft" : "border-app-muted bg-white"}`}
-                      >
-                        {/* Class header */}
-                        <div className="flex items-start justify-between mb-3 gap-2">
-                          <button
-                            type="button"
-                            className="flex-1 text-left"
-                            onClick={() => setSelectedClassId(c.id)}
-                          >
-                            <p className="text-sm font-bold text-app-dark">{c.code} â€” {c.label}</p>
-                            <p className="text-xs text-app-dark/50">Brigade : {c.brigade.code}{c.brigade.label ? ` Â· ${c.brigade.label}` : ""}</p>
-                          </button>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="rounded-full bg-app-soft border border-app-muted px-2 py-0.5 text-[10px] font-semibold text-app-dark/60">{c.stageaires.length} stag.</span>
-                            <span className="rounded-full bg-app-soft border border-app-muted px-2 py-0.5 text-[10px] font-semibold text-app-dark/60">{c.instructeurs.length} instr.</span>
-                            {/* Delete class button */}
-                            <button
-                              type="button"
-                              title="Supprimer la classe"
-                              className="flex h-7 w-7 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-xs text-red-500 transition hover:bg-red-100 hover:text-red-700"
-                              onClick={async () => {
-                                if (!confirm(`Supprimer la classe « ${c.label} » ?`)) return;
-                                await apiFetch(`/api/admin/classes/${c.id}/delete/`, { method: "DELETE" });
-                                if (selectedClassId === c.id) setSelectedClassId("");
-                                await loadClasses();
-                              }}
-                            >
-                              ðŸ—‘
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Members */}
-                        <div className="space-y-2">
-                          {/* Instructeurs */}
-                          <div>
-                            <p className="text-[10px] uppercase tracking-wide font-bold text-app-dark/40 mb-1">Instructeurs</p>
-                            {c.instructeurs.length === 0 ? (
-                              <p className="text-xs text-app-dark/30 italic">Aucun</p>
-                            ) : (
-                              <div className="flex flex-wrap gap-1">
-                                {c.instructeurs.map((i) => (
-                                  <span key={`instr-${i.id ?? i.username}`} className="flex items-center gap-1 rounded-full border border-app-muted bg-white pl-1 pr-1.5 py-0.5 text-[11px] font-medium text-app-dark">
-                                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white" style={{ background: "#982598" }}>{i.username[0]?.toUpperCase()}</span>
-                                    {i.username}
-                                    <button
-                                      type="button"
-                                      title="Retirer"
-                                      className="ml-0.5 text-red-400 hover:text-red-600 leading-none"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        await apiFetch(`/api/admin/classes/${c.id}/remove-instructeur/`, {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ instructeur_id: i.id }),
-                                        });
-                                        await loadClasses();
-                                      }}
-                                    >
-                                      âœ•
-                                    </button>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Stagiaires */}
-                          <div>
-                            <p className="text-[10px] uppercase tracking-wide font-bold text-app-dark/40 mb-1">Stagiaires</p>
-                            {c.stageaires.length === 0 ? (
-                              <p className="text-xs text-app-dark/30 italic">Aucun</p>
-                            ) : (
-                              <div className="flex flex-wrap gap-1">
-                                {c.stageaires.slice(0, 8).map((s) => (
-                                  <span key={`stag-${s.id ?? s.username}`} className="flex items-center gap-1 rounded-full border border-app-muted bg-white pl-1 pr-1.5 py-0.5 text-[11px] font-medium text-app-dark">
-                                    <span className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold text-white" style={{ background: "#15173D" }}>{s.username[0]?.toUpperCase()}</span>
-                                    {s.username}
-                                    <button
-                                      type="button"
-                                      title="Retirer"
-                                      className="ml-0.5 text-red-400 hover:text-red-600 leading-none"
-                                      onClick={async (e) => {
-                                        e.stopPropagation();
-                                        await apiFetch(`/api/admin/classes/${c.id}/remove-stageaire/`, {
-                                          method: "POST",
-                                          headers: { "Content-Type": "application/json" },
-                                          body: JSON.stringify({ stageaire_id: s.id }),
-                                        });
-                                        await loadClasses();
-                                      }}
-                                    >
-                                      âœ•
-                                    </button>
-                                  </span>
-                                ))}
-                                {c.stageaires.length > 8 && (
-                                  <span className="rounded-full border border-app-muted bg-app-soft px-2 py-0.5 text-[11px] text-app-dark/50">+{c.stageaires.length - 8}</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-            ) : null}
           </article>
         </section>
       ) : null}
@@ -6348,7 +6157,7 @@ function DashboardPage({
                     value={renameModal.corps_id}
                     onChange={(e) => setRenameModal((prev) => ({ ...prev, corps_id: e.target.value }))}
                   >
-                    {renameModal.target === "speciality" && <option value="">â€” aucun â€”</option>}
+                    {renameModal.target === "speciality" && <option value="">— aucun —</option>}
                     {referencesData.corps.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
                     ))}
@@ -6443,22 +6252,20 @@ function AppShell() {
     return data.access;
   };
 
-  /* eslint-disable react-hooks/preserve-manual-memoization */
   const loadProfile = useCallback(
     async (tokenOverride?: string) => {
-      const token = tokenOverride ?? accessToken;
+      let token = tokenOverride ?? accessToken;
       if (!token) return;
-      let response = await fetch(`${API_BASE_URL}/api/me/`, {
+
+      if (isTokenExpired(token)) {
+        const refreshed = await refreshAccessToken();
+        if (!refreshed) return;
+        token = refreshed;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/me/`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (response.status === 401) {
-        const newAccessToken = await refreshAccessToken();
-        if (!newAccessToken) return;
-        response = await fetch(`${API_BASE_URL}/api/me/`, {
-          headers: { Authorization: `Bearer ${newAccessToken}` },
-        });
-      }
 
       if (!response.ok) {
         setError(t("errors.profileLoadFailed"));
@@ -6468,33 +6275,37 @@ function AppShell() {
       const data: MeResponse = await response.json();
       setUser(data);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [accessToken, refreshToken, t],
   );
-  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   const apiFetch = async (path: string, init?: RequestInit) => {
-    if (!accessToken) {
-      return new Response(null, { status: 401 });
+    let token = accessToken;
+    if (!token) return new Response(null, { status: 401 });
+
+    if (isTokenExpired(token)) {
+      token = await refreshAccessToken() ?? null;
+      if (!token) return new Response(null, { status: 401 });
     }
 
     const withAuth: RequestInit = {
       ...init,
       headers: {
         ...(init?.headers ?? {}),
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${token}`,
       },
     };
     let response = await fetch(`${API_BASE_URL}${path}`, withAuth);
     if (response.status !== 401) return response;
 
-    const newAccessToken = await refreshAccessToken();
-    if (!newAccessToken) return response;
+    const newToken = await refreshAccessToken();
+    if (!newToken) return response;
 
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       headers: {
         ...(init?.headers ?? {}),
-        Authorization: `Bearer ${newAccessToken}`,
+        Authorization: `Bearer ${newToken}`,
       },
     });
     return response;
@@ -6572,11 +6383,11 @@ function AppShell() {
       void refreshAccessToken();
     }, 4 * 60 * 1000);
     return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
 
   useEffect(() => {
     if (!accessToken) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadProfile();
   }, [accessToken, loadProfile]);
 
@@ -6626,6 +6437,8 @@ function App() {
 }
 
 export default App;
+
+
 
 
 

@@ -104,7 +104,7 @@ void i18n.use(initReactI18next).init({
           accountDisconnected: "Aucune session active.",
         },
         labels: {
-          username: "Nom d'utilisateur",
+          username: "Matricule",
           password: "Mot de passe",
           email: "Email",
           matriculeRequired: "Matricule (obligatoire pour profils militaires)",

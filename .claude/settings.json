@@ -18,7 +18,8 @@
       "Bash(powershell -Command \"\\(Get-Content src/App.tsx\\) -replace '#15173D', '#6A1B9A' -replace '#0E0F29', '#4A1070' -replace '#1E1F4A', '#7B1FA2' -replace '#1e2050', '#7B1FA2' | Set-Content src/App.tsx -Encoding utf8\")",
       "Bash(powershell -Command \"\\(Get-Content src/App.tsx\\) -replace '#6A1B9A', '#15173D' -replace '#5DBB2F', '#982598' -replace '#4A1070', '#0E0F29' -replace '#7B1FA2', '#1E1F4A' | Set-Content src/App.tsx -Encoding utf8\")",
       "Bash(powershell -Command \"Select-String -Path src/App.tsx -Pattern '✓|✅|☑' | Select-Object -First 20\")",
-      "Bash(powershell -Command \"Select-String -Path src/App.tsx -Pattern '✓|✅|✔' | Select-Object -First 20\")"
+      "Bash(powershell -Command \"Select-String -Path src/App.tsx -Pattern '✓|✅|✔' | Select-Object -First 20\")",
+      "Bash(node -e ' *)"
     ]
   }
 }

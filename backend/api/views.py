@@ -1,6 +1,7 @@
 import base64
 import csv
 import io
+import zipfile
 import secrets
 import string
 
@@ -16,13 +17,9 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
 from .models import (
-    AffectationInstructeurClasse,
     AffectationSujetStage,
-    Brigade,
     Brochure,
-    Classe,
     Controle,
     ControleCorrection,
     Corps,
@@ -40,8 +37,9 @@ from .models import (
     Rank,
     Specialite,
     Speciality,
-    StagiaireClasse,
     SoumissionControle,
+    SujetFinStage,
+    SujetFinStageFichier,
     UserProfile,
 )
 
@@ -309,11 +307,7 @@ class InstructeurDashboardView(APIView):
         if profile.role != UserProfile.ROLE_INSTRUCTEUR:
             return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
 
-        classes = (
-            AffectationInstructeurClasse.objects.filter(instructeur=request.user)
-            .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=timezone.now().date()))
-            .select_related("classe", "classe__brigade")
-        )
+        User = get_user_model()
         cours_queryset = Cours.objects.filter(instructeur=request.user)
         controles_queryset = Controle.objects.filter(instructeur=request.user)
         pending_corrections = SoumissionControle.objects.filter(
@@ -321,20 +315,11 @@ class InstructeurDashboardView(APIView):
         ).filter(evaluation__isnull=True)
         sujets = AffectationSujetStage.objects.filter(encadrant=request.user)
         unread_notifications = Notification.objects.filter(destinataire=request.user, est_lue=False)
+        stagiaires = User.objects.filter(profile__role=UserProfile.ROLE_STAGIAIRE, is_active=True).select_related("profile")
 
         return Response(
             {
                 "role": profile.role,
-                "classes_count": classes.count(),
-                "classes": [
-                    {
-                        "id": item.classe.id_classe,
-                        "code": item.classe.code_classe,
-                        "label": item.classe.libelle,
-                        "brigade": item.classe.brigade.code_brigade,
-                    }
-                    for item in classes[:10]
-                ],
                 "cours": {
                     "total": cours_queryset.count(),
                     "published": cours_queryset.filter(statut=Cours.STATUT_PUBLIE).count(),
@@ -373,13 +358,20 @@ class InstructeurDashboardView(APIView):
                     "active": sujets.filter(etat=AffectationSujetStage.ETAT_EN_COURS).count(),
                     "list": [
                         {
+                            "sujet_id": s.sujet.id_sujet,
                             "sujet": s.sujet.titre,
+                            "description": s.sujet.description,
                             "stagiaire_id": s.stagiaire_id,
+                            "stagiaire_username": s.stagiaire.username,
                             "etat": s.etat,
                         }
-                        for s in sujets.select_related("sujet").order_by("-date_affectation")[:20]
+                        for s in sujets.select_related("sujet", "stagiaire").order_by("-date_affectation")[:20]
                     ],
                 },
+                "stagiaires_list": [
+                    {"id": u.id, "username": u.username}
+                    for u in stagiaires.order_by("username")
+                ],
                 "notifications": {
                     "unread_count": unread_notifications.count(),
                     "latest": [
@@ -437,17 +429,6 @@ class StageaireDashboardView(APIView):
         return Response(
             {
                 "role": profile.role,
-                "classes": [
-                    {
-                        "classe_code": s.classe.code_classe,
-                        "classe_label": s.classe.libelle,
-                        "brigade_code": s.classe.brigade.code_brigade,
-                        "brigade_label": s.classe.brigade.libelle,
-                    }
-                    for s in StagiaireClasse.objects.filter(stagiaire=request.user)
-                    .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=timezone.now().date()))
-                    .select_related("classe", "classe__brigade")[:10]
-                ],
                 "cours_list": [
                     {
                         "id": c.id_cours,
@@ -502,6 +483,7 @@ class StageaireDashboardView(APIView):
                     for note in notes.order_by("-date_publication")[:20]
                 ],
                 "sujet_fin_stage": {
+                    "sujet_id": sujet_affectation.sujet.id_sujet if sujet_affectation else None,
                     "titre": sujet_affectation.sujet.titre if sujet_affectation else None,
                     "description": sujet_affectation.sujet.description if sujet_affectation else None,
                     "etat": sujet_affectation.etat if sujet_affectation else None,
@@ -533,62 +515,76 @@ class CoordinateurDashboardView(APIView):
         if profile.role != UserProfile.ROLE_COORDINATEUR:
             return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
 
-        brigades_data = []
-        all_stag_ids: set = set()
-        all_avec_note_ids: set = set()
-        all_reussite_ids: set = set()
+        User = get_user_model()
+        stagiaires = User.objects.filter(profile__role=UserProfile.ROLE_STAGIAIRE)
+        instructeurs = User.objects.filter(profile__role=UserProfile.ROLE_INSTRUCTEUR)
 
-        for brigade in Brigade.objects.all().order_by("code_brigade")[:100]:
-            classes = Classe.objects.filter(brigade=brigade)
-            class_ids = list(classes.values_list("id_classe", flat=True))
-            stagiaire_ids = list(
-                StagiaireClasse.objects.filter(classe_id__in=class_ids).values_list("stagiaire_id", flat=True)
-            )
-            stagiaire_ids_set = set(stagiaire_ids)
+        stag_avgs = (
+            Evaluation.objects.filter(est_publiee=True)
+            .values("soumission__stagiaire_id")
+            .annotate(avg=models.Avg("note"))
+        )
+        avg_by_stag = {row["soumission__stagiaire_id"]: float(row["avg"]) for row in stag_avgs}
+        avec_note_ids = set(avg_by_stag.keys())
+        reussite_ids = {sid for sid, avg in avg_by_stag.items() if avg >= 10}
+        global_notes_avg = Evaluation.objects.filter(est_publiee=True).aggregate(avg=models.Avg("note"))["avg"]
+        global_taux = round(len(reussite_ids) / len(avec_note_ids) * 100, 1) if avec_note_ids else None
 
-            stag_avgs = (
-                Evaluation.objects.filter(soumission__stagiaire_id__in=stagiaire_ids, est_publiee=True)
-                .values("soumission__stagiaire_id")
-                .annotate(avg=models.Avg("note"))
-            )
-            avec_note_ids = {row["soumission__stagiaire_id"] for row in stag_avgs}
-            reussite_ids = {row["soumission__stagiaire_id"] for row in stag_avgs if float(row["avg"]) >= 10}
+        soumissions_by_stag = (
+            SoumissionControle.objects.values("stagiaire_id").annotate(cnt=models.Count("id_soumission"))
+        )
+        soum_count_map = {row["stagiaire_id"]: row["cnt"] for row in soumissions_by_stag}
 
-            notes_qs = Evaluation.objects.filter(soumission__stagiaire_id__in=stagiaire_ids, est_publiee=True)
-            avg_note = notes_qs.aggregate(avg=models.Avg("note"))["avg"]
-            taux = round(len(reussite_ids) / len(avec_note_ids) * 100, 1) if avec_note_ids else None
-            soumissions_count = SoumissionControle.objects.filter(stagiaire_id__in=stagiaire_ids).count()
+        affectations = AffectationSujetStage.objects.select_related("sujet", "encadrant").all()
+        affectation_map = {a.stagiaire_id: a for a in affectations}
 
-            all_stag_ids.update(stagiaire_ids_set)
-            all_avec_note_ids.update(avec_note_ids)
-            all_reussite_ids.update(reussite_ids)
-
-            brigades_data.append({
-                "brigade_code": brigade.code_brigade,
-                "classes_count": classes.count(),
-                "stagiaires_count": len(stagiaire_ids_set),
-                "avec_notes_count": len(avec_note_ids),
-                "published_notes_count": notes_qs.count(),
-                "note_moyenne": round(float(avg_note), 2) if avg_note is not None else None,
-                "taux_reussite": taux,
-                "soumissions_count": soumissions_count,
+        stagiaires_detail = []
+        for s in stagiaires.order_by("username"):
+            aff = affectation_map.get(s.id)
+            stagiaires_detail.append({
+                "id": s.id,
+                "username": s.username,
+                "soumissions_count": soum_count_map.get(s.id, 0),
+                "notes_avg": round(avg_by_stag[s.id], 2) if s.id in avg_by_stag else None,
+                "encadrant_id": aff.encadrant_id if aff else None,
+                "encadrant": aff.encadrant.username if aff else None,
+                "sujet_titre": aff.sujet.titre if aff else None,
             })
 
-        global_notes_avg = Evaluation.objects.filter(est_publiee=True).aggregate(avg=models.Avg("note"))["avg"]
-        global_taux = round(len(all_reussite_ids) / len(all_avec_note_ids) * 100, 1) if all_avec_note_ids else None
+        # Per-module stats
+        modules = Module.objects.prefetch_related("matieres__cours__controles").order_by("ordre", "nom")
+        par_module = []
+        for m in modules:
+            cours_ids = list(Cours.objects.filter(module=m).values_list("id_cours", flat=True))
+            ctrl_ids = list(Controle.objects.filter(cours_id__in=cours_ids).values_list("id_controle", flat=True))
+            avg_mod = (
+                Evaluation.objects.filter(est_publiee=True, soumission__controle_id__in=ctrl_ids)
+                .aggregate(avg=models.Avg("note"))["avg"]
+            )
+            par_module.append({
+                "module": m.nom,
+                "cours_count": len(cours_ids),
+                "controls_count": len(ctrl_ids),
+                "notes_avg": round(float(avg_mod), 2) if avg_mod is not None else None,
+            })
 
         return Response(
             {
                 "role": profile.role,
                 "monitoring": {
-                    "brigades": brigades_data,
                     "controls_total": Controle.objects.count(),
                     "controls_published": Controle.objects.filter(statut=Controle.STATUT_PUBLIE).count(),
                     "notes_published": Evaluation.objects.filter(est_publiee=True).count(),
+                    "soumissions_total": SoumissionControle.objects.count(),
                     "taux_reussite_global": global_taux,
                     "avancement_moyen": round(float(global_notes_avg), 2) if global_notes_avg is not None else None,
-                    "stagiaires_total": len(all_stag_ids),
+                    "stagiaires_total": stagiaires.count(),
                 },
+                "stagiaires_detail": stagiaires_detail,
+                "instructeurs_list": [
+                    {"id": u.id, "username": u.username} for u in instructeurs.order_by("username")
+                ],
+                "par_module": par_module,
                 "notifications": {
                     "unread_count": Notification.objects.filter(destinataire=request.user, est_lue=False).count(),
                 },
@@ -600,34 +596,30 @@ class CoordinateurReportExportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def _build_rows(self):
+        User = get_user_model()
+        stagiaires = User.objects.filter(profile__role=UserProfile.ROLE_STAGIAIRE).order_by("username")
+        stag_avgs = (
+            Evaluation.objects.filter(est_publiee=True)
+            .values("soumission__stagiaire_id")
+            .annotate(avg=models.Avg("note"))
+        )
+        avg_by_stag = {row["soumission__stagiaire_id"]: float(row["avg"]) for row in stag_avgs}
+        soumissions_by_stag = (
+            SoumissionControle.objects.values("stagiaire_id").annotate(cnt=models.Count("id_soumission"))
+        )
+        soum_map = {row["stagiaire_id"]: row["cnt"] for row in soumissions_by_stag}
+        aff_map = {a.stagiaire_id: a for a in AffectationSujetStage.objects.select_related("encadrant", "sujet").all()}
         rows = []
-        for brigade in Brigade.objects.all().order_by("code_brigade"):
-            classes = Classe.objects.filter(brigade=brigade)
-            class_ids = list(classes.values_list("id_classe", flat=True))
-            stagiaire_ids = list(
-                StagiaireClasse.objects.filter(classe_id__in=class_ids).values_list("stagiaire_id", flat=True)
-            )
-            stagiaire_ids_set = set(stagiaire_ids)
-            stag_avgs = (
-                Evaluation.objects.filter(soumission__stagiaire_id__in=stagiaire_ids, est_publiee=True)
-                .values("soumission__stagiaire_id")
-                .annotate(avg=models.Avg("note"))
-            )
-            avec_note_ids = {row["soumission__stagiaire_id"] for row in stag_avgs}
-            reussite_ids = {row["soumission__stagiaire_id"] for row in stag_avgs if float(row["avg"]) >= 10}
-            notes_qs = Evaluation.objects.filter(soumission__stagiaire_id__in=stagiaire_ids, est_publiee=True)
-            avg_note = notes_qs.aggregate(avg=models.Avg("note"))["avg"]
-            taux = round(len(reussite_ids) / len(avec_note_ids) * 100, 1) if avec_note_ids else ""
-            soumissions = SoumissionControle.objects.filter(stagiaire_id__in=stagiaire_ids).count()
+        for s in stagiaires:
+            aff = aff_map.get(s.id)
+            avg = avg_by_stag.get(s.id)
             rows.append([
-                brigade.code_brigade,
-                classes.count(),
-                len(stagiaire_ids_set),
-                len(avec_note_ids),
-                notes_qs.count(),
-                round(float(avg_note), 2) if avg_note is not None else "",
-                taux,
-                soumissions,
+                s.username,
+                soum_map.get(s.id, 0),
+                round(avg, 2) if avg is not None else "",
+                "Réussi" if avg is not None and avg >= 10 else ("Échec" if avg is not None else "—"),
+                aff.encadrant.username if aff else "",
+                aff.sujet.titre if aff else "",
             ])
         return rows
 
@@ -636,8 +628,8 @@ class CoordinateurReportExportView(APIView):
         if profile.role != UserProfile.ROLE_COORDINATEUR:
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
-        fmt = request.query_params.get("format", "csv")
-        headers = ["Brigade", "Classes", "Stagiaires", "Avec notes", "Notes publiées", "Moyenne (/20)", "Taux réussite (%)", "Soumissions"]
+        fmt = request.query_params.get("fmt", "csv")
+        headers = ["Stagiaire", "Soumissions", "Moyenne (/20)", "Statut", "Encadrant", "Sujet fin de stage"]
         rows = self._build_rows()
 
         if fmt == "xlsx":
@@ -686,104 +678,61 @@ class CoordinateurReportExportView(APIView):
         return response
 
 
-def _compute_class_leaderboard(classe, today):
-    """Return a sorted leaderboard list for a given Classe instance."""
-    stag_links = (
-        StagiaireClasse.objects.filter(classe=classe)
-        .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=today))
-        .select_related("stagiaire")
-    )
-    seen = set()
-    entries = []
-    for link in stag_links:
-        stag = link.stagiaire
-        if stag.id in seen:
-            continue
-        seen.add(stag.id)
-        evals = Evaluation.objects.filter(soumission__stagiaire=stag, est_publiee=True)
-        avg_result = evals.aggregate(avg=models.Avg("note"))
-        avg = round(float(avg_result["avg"]), 2) if avg_result["avg"] is not None else None
-        entries.append({"user": stag, "moyenne": avg, "count": evals.count()})
-
-    ranked = sorted([e for e in entries if e["moyenne"] is not None], key=lambda x: -x["moyenne"])
-    unranked = [e for e in entries if e["moyenne"] is None]
-
-    leaderboard = []
-    rank = 1
-    for i, e in enumerate(ranked):
-        r = leaderboard[-1]["rank"] if (i > 0 and e["moyenne"] == ranked[i - 1]["moyenne"]) else rank
-        leaderboard.append({
-            "rank": r,
-            "username": e["user"].username,
-            "user_id": e["user"].id,
-            "moyenne": e["moyenne"],
-            "evaluations_count": e["count"],
-        })
-        rank += 1
-    for e in unranked:
-        leaderboard.append({
-            "rank": None,
-            "username": e["user"].username,
-            "user_id": e["user"].id,
-            "moyenne": None,
-            "evaluations_count": 0,
-        })
-    return leaderboard
-
-
-class StageaireClassementView(APIView):
+class CoordinateurAssignStagiaireView(APIView):
+    """Coordinateur assigns a stagiaire to an instructeur (creates sujet + affectation)."""
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
+    def post(self, request):
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_STAGIAIRE:
+        if profile.role != UserProfile.ROLE_COORDINATEUR:
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
-        today = timezone.now().date()
-        my_classes = (
-            StagiaireClasse.objects.filter(stagiaire=request.user)
-            .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=today))
-            .select_related("classe")
+        User = get_user_model()
+        stagiaire_id = request.data.get("stagiaire_id")
+        instructeur_id = request.data.get("instructeur_id")
+        sujet_titre = (request.data.get("sujet_titre") or "").strip() or "Sujet fin de stage"
+
+        stagiaire = User.objects.filter(id=stagiaire_id, profile__role=UserProfile.ROLE_STAGIAIRE).first()
+        if not stagiaire:
+            return Response({"detail": "Stagiaire introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        instructeur = User.objects.filter(id=instructeur_id, profile__role=UserProfile.ROLE_INSTRUCTEUR).first()
+        if not instructeur:
+            return Response({"detail": "Instructeur introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        existing = AffectationSujetStage.objects.filter(stagiaire=stagiaire).first()
+        if existing:
+            existing.encadrant = instructeur
+            existing.save(update_fields=["encadrant"])
+            existing.sujet.titre = sujet_titre
+            existing.sujet.save(update_fields=["titre"])
+            return Response({"detail": "Affectation mise à jour."}, status=status.HTTP_200_OK)
+
+        sujet = SujetFinStage.objects.create(
+            titre=sujet_titre,
+            cree_par=instructeur,
+            statut=SujetFinStage.STATUT_VALIDE,
         )
-        classes_data = []
-        for sc in my_classes:
-            leaderboard = _compute_class_leaderboard(sc.classe, today)
-            my_entry = next((e for e in leaderboard if e["user_id"] == request.user.id), None)
-            # Add is_me flag per row
-            for e in leaderboard:
-                e["is_me"] = e["user_id"] == request.user.id
-            classes_data.append({
-                "classe_code": sc.classe.code_classe,
-                "classe_label": sc.classe.libelle,
-                "my_rank": my_entry["rank"] if my_entry else None,
-                "my_moyenne": my_entry["moyenne"] if my_entry else None,
-                "total": len(leaderboard),
-                "leaderboard": leaderboard,
-            })
-        return Response({"classes": classes_data})
+        AffectationSujetStage.objects.create(
+            sujet=sujet,
+            stagiaire=stagiaire,
+            encadrant=instructeur,
+        )
+        return Response({"detail": "Stagiaire assigné."}, status=status.HTTP_201_CREATED)
 
-
-class AdminClassementView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
+    def delete(self, request):
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
+        if profile.role != UserProfile.ROLE_COORDINATEUR:
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
-        today = timezone.now().date()
-        classes_data = []
-        for classe in Classe.objects.all().order_by("code_classe"):
-            leaderboard = _compute_class_leaderboard(classe, today)
-            if not leaderboard:
-                continue
-            classes_data.append({
-                "classe_code": classe.code_classe,
-                "classe_label": classe.libelle,
-                "total": len(leaderboard),
-                "leaderboard": leaderboard,
-            })
-        return Response({"classes": classes_data})
+        stagiaire_id = request.data.get("stagiaire_id")
+        aff = AffectationSujetStage.objects.filter(stagiaire_id=stagiaire_id).first()
+        if not aff:
+            return Response({"detail": "Aucune affectation."}, status=status.HTTP_404_NOT_FOUND)
+        sujet = aff.sujet
+        aff.delete()
+        sujet.delete()
+        return Response({"detail": "Affectation supprimée."}, status=status.HTTP_200_OK)
 
 
 class StageaireFichierRenseignementView(APIView):
@@ -1741,250 +1690,6 @@ class AdminUpdateCourseStatusView(APIView):
         return Response({"id": cours.id_cours, "status": cours.statut})
 
 
-class AdminClassesView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
-
-        today = timezone.now().date()
-        classes_payload = []
-        for classe in Classe.objects.select_related("brigade").all().order_by("code_classe"):
-            instructeur_links = (
-                AffectationInstructeurClasse.objects.filter(classe=classe)
-                .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=today))
-                .select_related("instructeur")
-            )
-            stageaire_links = (
-                StagiaireClasse.objects.filter(classe=classe)
-                .filter(Q(date_fin__isnull=True) | Q(date_fin__gte=today))
-                .select_related("stagiaire")
-            )
-            # Deduplicate by user ID to avoid duplicate IDs when multiple active
-            # affectation rows exist for the same person (different date_debut values)
-            seen_instr = set()
-            instructeurs = []
-            for link in instructeur_links:
-                if link.instructeur.id not in seen_instr:
-                    seen_instr.add(link.instructeur.id)
-                    instructeurs.append({"id": link.instructeur.id, "username": link.instructeur.username})
-            seen_stag = set()
-            stageaires = []
-            for link in stageaire_links:
-                if link.stagiaire.id not in seen_stag:
-                    seen_stag.add(link.stagiaire.id)
-                    stageaires.append({"id": link.stagiaire.id, "username": link.stagiaire.username})
-            classes_payload.append(
-                {
-                    "id": classe.id_classe,
-                    "code": classe.code_classe,
-                    "label": classe.libelle,
-                    "brigade": {
-                        "code": classe.brigade.code_brigade,
-                        "label": classe.brigade.libelle,
-                    },
-                    "instructeurs": instructeurs,
-                    "stageaires": stageaires,
-                }
-            )
-
-        return Response({"classes": classes_payload})
-
-    def post(self, request):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
-
-        libelle = (request.data.get("libelle") or "").strip()
-
-        if not libelle:
-            return Response(
-                {"detail": "Le nom de la classe est requis."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Auto-generate a unique code from the name
-        base_code = "".join(w[0] for w in libelle.upper().split() if w)[:6] or "CL"
-        code_classe = base_code
-        counter = 1
-        while Classe.objects.filter(code_classe=code_classe).exists():
-            code_classe = f"{base_code}{counter}"
-            counter += 1
-
-        # Use or create a default brigade
-        brigade, _ = Brigade.objects.get_or_create(
-            code_brigade="DEFAULT",
-            defaults={"libelle": "Brigade Principale"},
-        )
-
-        classe = Classe.objects.create(code_classe=code_classe, libelle=libelle, brigade=brigade)
-        log_event(
-            request=request,
-            event_type="admin.class.created",
-            target_type="class",
-            target_id=classe.id_classe,
-            message=f"Admin created class {classe.code_classe}",
-            metadata={"brigade_code": brigade.code_brigade},
-        )
-        return Response(
-            {
-                "id": classe.id_classe,
-                "code": classe.code_classe,
-                "label": classe.libelle,
-                "brigade": {"code": brigade.code_brigade, "label": brigade.libelle},
-            },
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class AdminAssignStageaireToClassView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, class_id):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
-
-        classe = Classe.objects.filter(id_classe=class_id).first()
-        if not classe:
-            return Response({"detail": "class not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        stageaire_id = request.data.get("stageaire_id")
-        if not stageaire_id:
-            return Response({"detail": "stageaire_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        user_model = get_user_model()
-        stageaire = user_model.objects.filter(id=stageaire_id).first()
-        if not stageaire:
-            return Response({"detail": "stageaire not found"}, status=status.HTTP_404_NOT_FOUND)
-        if getattr(getattr(stageaire, "profile", None), "role", None) != UserProfile.ROLE_STAGIAIRE:
-            return Response({"detail": "target user is not Stagiaire"}, status=status.HTTP_400_BAD_REQUEST)
-
-        today = timezone.now().date()
-        StagiaireClasse.objects.filter(stagiaire=stageaire, date_fin__isnull=True).exclude(classe=classe).update(date_fin=today)
-
-        assignment, created = StagiaireClasse.objects.get_or_create(
-            stagiaire=stageaire,
-            classe=classe,
-            date_fin__isnull=True,
-            defaults={"date_debut": today},
-        )
-        if not created:
-            return Response(
-                {"assignment_id": assignment.id_stagiaire_classe, "status": "already_assigned"},
-                status=status.HTTP_200_OK,
-            )
-
-        log_event(
-            request=request,
-            event_type="admin.class.stageaire_assigned",
-            target_type="class",
-            target_id=classe.id_classe,
-            message=f"Stagiaire assigned to class {classe.code_classe}",
-            metadata={"stageaire_id": stageaire.id},
-        )
-
-        return Response(
-            {"assignment_id": assignment.id_stagiaire_classe, "status": "assigned"},
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class AdminAssignInstructeurToClassView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, class_id):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden for this role"}, status=status.HTTP_403_FORBIDDEN)
-
-        classe = Classe.objects.filter(id_classe=class_id).first()
-        if not classe:
-            return Response({"detail": "class not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        instructeur_id = request.data.get("instructeur_id")
-        if not instructeur_id:
-            return Response({"detail": "instructeur_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        user_model = get_user_model()
-        instructeur = user_model.objects.filter(id=instructeur_id).first()
-        if not instructeur:
-            return Response({"detail": "instructeur not found"}, status=status.HTTP_404_NOT_FOUND)
-        if getattr(getattr(instructeur, "profile", None), "role", None) != UserProfile.ROLE_INSTRUCTEUR:
-            return Response({"detail": "target user is not Instructeur"}, status=status.HTTP_400_BAD_REQUEST)
-
-        today = timezone.now().date()
-        assignment, created = AffectationInstructeurClasse.objects.get_or_create(
-            instructeur=instructeur,
-            classe=classe,
-            date_debut=today,
-            defaults={"date_fin": None},
-        )
-        if created:
-            log_event(
-                request=request,
-                event_type="admin.class.instructeur_assigned",
-                target_type="class",
-                target_id=classe.id_classe,
-                message=f"Instructeur assigned to class {classe.code_classe}",
-                metadata={"instructeur_id": instructeur.id},
-            )
-        return Response(
-            {"assignment_id": assignment.id_affectation, "status": "assigned" if created else "already_assigned"},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
-
-
-class AdminDeleteClassView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def delete(self, request, class_id):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
-        classe = Classe.objects.filter(id_classe=class_id).first()
-        if not classe:
-            return Response({"detail": "class not found"}, status=status.HTTP_404_NOT_FOUND)
-        classe.delete()
-        return Response({"status": "deleted"})
-
-
-class AdminRemoveStageaireFromClassView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, class_id):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
-        stageaire_id = request.data.get("stageaire_id")
-        today = timezone.now().date()
-        StagiaireClasse.objects.filter(
-            classe__id_classe=class_id,
-            stagiaire_id=stageaire_id,
-            date_fin__isnull=True,
-        ).update(date_fin=today)
-        return Response({"status": "removed"})
-
-
-class AdminRemoveInstructeurFromClassView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, class_id):
-        profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_ADMIN:
-            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
-        instructeur_id = request.data.get("instructeur_id")
-        today = timezone.now().date()
-        AffectationInstructeurClasse.objects.filter(
-            classe__id_classe=class_id,
-            instructeur_id=instructeur_id,
-            date_fin__isnull=True,
-        ).update(date_fin=today)
-        return Response({"status": "removed"})
-
-
 class InstructeurCoursCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1998,7 +1703,6 @@ class InstructeurCoursCreateView(APIView):
         specialite_id = request.data.get("specialite_id")
         module_id = request.data.get("module_id")
         matiere_id = request.data.get("matiere_id")
-        classe_id = request.data.get("classe_id")
         publier = bool(request.data.get("publier", False))
 
         if not titre:
@@ -2025,10 +1729,6 @@ class InstructeurCoursCreateView(APIView):
             if not module and matiere.module:
                 module = matiere.module
 
-        classe = None
-        if classe_id:
-            classe = Classe.objects.filter(id_classe=classe_id).first()
-
         cours = Cours.objects.create(
             titre=titre,
             description=description,
@@ -2036,7 +1736,6 @@ class InstructeurCoursCreateView(APIView):
             specialite=specialite,
             module=module,
             matiere=matiere,
-            classe=classe,
             statut=Cours.STATUT_PUBLIE if publier else Cours.STATUT_BROUILLON,
             date_depot=timezone.now().date(),
         )
@@ -2740,6 +2439,7 @@ class InstallationLogicielsFichiersListView(APIView):
                     "id": f.id,
                     "titre": f.titre,
                     "nom_fichier": f.nom_fichier,
+                    "mime_type": f.mime_type,
                     "uploaded_at": f.uploaded_at.isoformat(),
                 }
                 for f in fichiers
@@ -2805,6 +2505,83 @@ class InstructeurInstallationLogicielsDeleteView(APIView):
         return Response({"detail": "Supprimé."})
 
 
+class InstallationLogicielsZipContentsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, fichier_id):
+        f = InstallationLogicielFichier.objects.filter(id=fichier_id).first()
+        if not f or not f.fichier:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            with zipfile.ZipFile(io.BytesIO(bytes(f.fichier))) as zf:
+                entries = [
+                    {
+                        "path": i.filename,
+                        "size": i.file_size,
+                        "compressed_size": i.compress_size,
+                        "is_dir": i.is_dir(),
+                    }
+                    for i in zf.infolist()
+                ]
+        except zipfile.BadZipFile:
+            return Response({"detail": "Ce fichier n'est pas un ZIP valide."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"entries": entries})
+
+
+class InstallationLogicielsZipEntryDownloadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, fichier_id):
+        import mimetypes
+        entry_path = request.query_params.get("path", "").strip()
+        if not entry_path:
+            return Response({"detail": "Paramètre 'path' requis."}, status=status.HTTP_400_BAD_REQUEST)
+        f = InstallationLogicielFichier.objects.filter(id=fichier_id).first()
+        if not f or not f.fichier:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            with zipfile.ZipFile(io.BytesIO(bytes(f.fichier))) as zf:
+                if entry_path not in zf.namelist():
+                    return Response({"detail": "Entrée introuvable dans le ZIP."}, status=status.HTTP_404_NOT_FOUND)
+                entry_bytes = zf.read(entry_path)
+        except zipfile.BadZipFile:
+            return Response({"detail": "Ce fichier n'est pas un ZIP valide."}, status=status.HTTP_400_BAD_REQUEST)
+        mime, _ = mimetypes.guess_type(entry_path)
+        return Response({
+            "fichier_base64": base64.b64encode(entry_bytes).decode(),
+            "nom_fichier": entry_path.split("/")[-1] or entry_path,
+            "mime_type": mime or "application/octet-stream",
+        })
+
+
+class InstallationLogicielsZipExtractView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, fichier_id):
+        paths = request.data.get("paths", [])
+        if not isinstance(paths, list) or not paths:
+            return Response({"detail": "Liste 'paths' requise et non vide."}, status=status.HTTP_400_BAD_REQUEST)
+        f = InstallationLogicielFichier.objects.filter(id=fichier_id).first()
+        if not f or not f.fichier:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            output_buf = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(bytes(f.fichier)), "r") as src:
+                available = set(src.namelist())
+                with zipfile.ZipFile(output_buf, "w", compression=zipfile.ZIP_DEFLATED) as dst:
+                    for p in paths:
+                        if p in available:
+                            dst.writestr(p, src.read(p))
+        except zipfile.BadZipFile:
+            return Response({"detail": "Ce fichier n'est pas un ZIP valide."}, status=status.HTTP_400_BAD_REQUEST)
+        base_name = f.nom_fichier.rsplit(".", 1)[0] if "." in f.nom_fichier else f.nom_fichier
+        return Response({
+            "fichier_base64": base64.b64encode(output_buf.getvalue()).decode(),
+            "nom_fichier": f"{base_name}_selection.zip",
+            "mime_type": "application/zip",
+        })
+
+
 # ── Correction fichier (stagiaire) ────────────────────────────────────────────
 
 class StageaireCorrectionFichierView(APIView):
@@ -2827,3 +2604,205 @@ class StageaireCorrectionFichierView(APIView):
             "nom_fichier": correction.nom_fichier_correction or "correction.pdf",
             "mime_type": correction.mime_type_correction or "application/pdf",
         })
+
+
+class InstructeurSujetFichierView(APIView):
+    """Instructor uploads (POST) or deletes (DELETE) the PDF attached to a sujet fin de stage they supervise."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_sujet(self, request, sujet_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+            return None, Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        sujet = SujetFinStage.objects.filter(
+            id_sujet=sujet_id,
+            affectations__encadrant=request.user,
+        ).first()
+        if not sujet:
+            return None, Response({"detail": "Sujet not found"}, status=status.HTTP_404_NOT_FOUND)
+        return sujet, None
+
+    def post(self, request, sujet_id):
+        sujet, err = self._get_sujet(request, sujet_id)
+        if err:
+            return err
+        fichier_b64 = (request.data.get("fichier_base64") or "").strip()
+        nom_fichier = (request.data.get("nom_fichier") or "document.pdf").strip()
+        mime_type = (request.data.get("mime_type") or "application/pdf").strip()
+        if not fichier_b64:
+            return Response({"detail": "fichier_base64 is required"}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            file_bytes = base64.b64decode(fichier_b64)
+        except Exception:
+            return Response({"detail": "fichier_base64 invalide"}, status=status.HTTP_400_BAD_REQUEST)
+        sujet.fichier_pdf = file_bytes
+        sujet.nom_fichier_pdf = nom_fichier
+        sujet.mime_type_pdf = mime_type
+        sujet.save(update_fields=["fichier_pdf", "nom_fichier_pdf", "mime_type_pdf"])
+        return Response({"detail": "Fichier partagé.", "nom_fichier": nom_fichier}, status=status.HTTP_200_OK)
+
+    def delete(self, request, sujet_id):
+        sujet, err = self._get_sujet(request, sujet_id)
+        if err:
+            return err
+        sujet.fichier_pdf = None
+        sujet.nom_fichier_pdf = ""
+        sujet.mime_type_pdf = ""
+        sujet.save(update_fields=["fichier_pdf", "nom_fichier_pdf", "mime_type_pdf"])
+        return Response({"detail": "Fichier supprimé."}, status=status.HTTP_200_OK)
+
+
+class SujetFichierDownloadView(APIView):
+    """Download the PDF attached to a sujet fin de stage (instructor or stagiaire)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, sujet_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role == UserProfile.ROLE_INSTRUCTEUR:
+            sujet = SujetFinStage.objects.filter(
+                id_sujet=sujet_id,
+                affectations__encadrant=request.user,
+            ).first()
+        elif profile.role == UserProfile.ROLE_STAGIAIRE:
+            sujet = SujetFinStage.objects.filter(
+                id_sujet=sujet_id,
+                affectations__stagiaire=request.user,
+            ).first()
+        else:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        if not sujet or not sujet.fichier_pdf:
+            return Response({"detail": "Fichier not found"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "fichier_base64": base64.b64encode(bytes(sujet.fichier_pdf)).decode(),
+            "nom_fichier": sujet.nom_fichier_pdf or "document.pdf",
+            "mime_type": sujet.mime_type_pdf or "application/pdf",
+        })
+
+
+class InstructeurCreateSujetView(APIView):
+    """Instructor creates a new SujetFinStage, assigns it to a stagiaire, and optionally attaches a Word file."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        titre = (request.data.get("titre") or "").strip()
+        description = (request.data.get("description") or "").strip()
+        stagiaire_id = request.data.get("stagiaire_id")
+        fichier_b64 = (request.data.get("fichier_base64") or "").strip()
+        nom_fichier = (request.data.get("nom_fichier") or "").strip()
+        mime_type = (request.data.get("mime_type") or "application/vnd.openxmlformats-officedocument.wordprocessingml.document").strip()
+
+        if not titre:
+            return Response({"detail": "titre est requis"}, status=status.HTTP_400_BAD_REQUEST)
+        if not stagiaire_id:
+            return Response({"detail": "stagiaire_id est requis"}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        stagiaire = User.objects.filter(id=stagiaire_id, profile__role=UserProfile.ROLE_STAGIAIRE).first()
+        if not stagiaire:
+            return Response({"detail": "Stagiaire introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        if AffectationSujetStage.objects.filter(stagiaire=stagiaire).exists():
+            return Response({"detail": "Ce stagiaire a déjà un sujet assigné"}, status=status.HTTP_400_BAD_REQUEST)
+
+        file_bytes = None
+        if fichier_b64:
+            try:
+                file_bytes = base64.b64decode(fichier_b64)
+            except Exception:
+                return Response({"detail": "fichier_base64 invalide"}, status=status.HTTP_400_BAD_REQUEST)
+
+        sujet = SujetFinStage.objects.create(
+            titre=titre,
+            description=description,
+            cree_par=request.user,
+            statut=SujetFinStage.STATUT_VALIDE,
+        )
+        AffectationSujetStage.objects.create(
+            sujet=sujet,
+            stagiaire=stagiaire,
+            encadrant=request.user,
+        )
+        return Response({"sujet_id": sujet.id_sujet, "titre": sujet.titre}, status=status.HTTP_201_CREATED)
+
+
+class SujetFinStageFichiersListView(APIView):
+    """List all shared Word documents for Sujets fin de stage (visible to all authenticated users)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fichiers = SujetFinStageFichier.objects.all().order_by("-uploaded_at")
+        return Response({
+            "fichiers": [
+                {
+                    "id": f.id,
+                    "titre": f.titre,
+                    "nom_fichier": f.nom_fichier,
+                    "mime_type": f.mime_type,
+                    "uploaded_at": f.uploaded_at.isoformat(),
+                    "uploaded_by": f.uploaded_by.username if f.uploaded_by else "",
+                }
+                for f in fichiers
+            ]
+        })
+
+
+class SujetFinStageFichierDownloadView(APIView):
+    """Download a shared Word document."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, fichier_id):
+        f = SujetFinStageFichier.objects.filter(id=fichier_id).first()
+        if not f or not f.fichier:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "fichier_base64": base64.b64encode(bytes(f.fichier)).decode(),
+            "nom_fichier": f.nom_fichier,
+            "mime_type": f.mime_type,
+        })
+
+
+class InstructeurSujetFinStageFichierUploadView(APIView):
+    """Instructor uploads a Word document shared with all stagiaires."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        fichier_base64 = (request.data.get("fichier_base64") or "").strip()
+        nom_fichier = (request.data.get("nom_fichier") or "document.docx").strip()
+        mime_type = (request.data.get("mime_type") or "application/vnd.openxmlformats-officedocument.wordprocessingml.document").strip()
+        titre = (request.data.get("titre") or nom_fichier).strip()
+        if not fichier_base64:
+            return Response({"detail": "fichier_base64 requis."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            fichier_bytes = base64.b64decode(fichier_base64)
+        except Exception:
+            return Response({"detail": "fichier_base64 invalide."}, status=status.HTTP_400_BAD_REQUEST)
+        SujetFinStageFichier.objects.create(
+            titre=titre,
+            nom_fichier=nom_fichier,
+            mime_type=mime_type,
+            fichier=fichier_bytes,
+            uploaded_by=request.user,
+        )
+        return Response({"detail": "Fichier partagé."}, status=status.HTTP_201_CREATED)
+
+
+class InstructeurSujetFinStageFichierDeleteView(APIView):
+    """Instructor deletes a shared Word document they uploaded."""
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, fichier_id):
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+        f = SujetFinStageFichier.objects.filter(id=fichier_id, uploaded_by=request.user).first()
+        if not f:
+            return Response({"detail": "Fichier introuvable."}, status=status.HTTP_404_NOT_FOUND)
+        f.delete()
+        return Response({"detail": "Fichier supprimé."}, status=status.HTTP_200_OK)
