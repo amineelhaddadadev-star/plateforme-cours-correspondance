@@ -237,14 +237,13 @@ function Layout({
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
           <Link className="flex items-center gap-2.5 text-lg font-semibold tracking-tight text-app-dark" to="/">
             <img
-              src="/logo.svg"
+              src="/logo.png"
               alt="Logo"
               className="h-10 w-10 object-contain"
             />
             <span>{t("nav.brand")}</span>
           </Link>
           <nav className="flex items-center gap-2">
-            <HeaderLink to="/">{t("nav.home")}</HeaderLink>
             {!user ? (
               <>
                 <HeaderLink to="/login">{t("nav.login")}</HeaderLink>
