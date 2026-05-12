@@ -2771,7 +2771,7 @@ class InstructeurSujetFinStageFichierUploadView(APIView):
 
     def post(self, request):
         profile, _ = UserProfile.objects.get_or_create(user=request.user)
-        if profile.role != UserProfile.ROLE_INSTRUCTEUR:
+        if profile.role not in (UserProfile.ROLE_INSTRUCTEUR, UserProfile.ROLE_ADMIN):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
         fichier_base64 = (request.data.get("fichier_base64") or "").strip()
         nom_fichier = (request.data.get("nom_fichier") or "document.docx").strip()
