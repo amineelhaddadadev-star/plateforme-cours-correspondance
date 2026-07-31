@@ -247,7 +247,6 @@ function Layout({
             {!user ? (
               <>
                 <HeaderLink to="/login">{t("nav.login")}</HeaderLink>
-                <HeaderLink to="/signup">{t("nav.signup")}</HeaderLink>
               </>
             ) : (
               <>
@@ -1027,13 +1026,6 @@ function HomePage() {
               >
                 Se connecter →
               </Link>
-              <Link
-                className="rounded-xl border px-6 py-3 text-sm font-bold transition hover:bg-white/10"
-                style={{ borderColor: "rgba(166,178,139,0.45)", color: "#A6B28B" }}
-                to="/signup"
-              >
-                Créer un compte
-              </Link>
             </div>
           </div>
 
@@ -1342,6 +1334,8 @@ function DashboardPage({
   type ZipEntry = { path: string; size: number; compressed_size: number; is_dir: boolean };
   const isZipFichier = (f: InstallFichier) =>
     f.nom_fichier.toLowerCase().endsWith(".zip") || f.mime_type.includes("zip");
+  const [sujetFichiers, setSujetFichiers] = useState<SujetFinStageFichierItem[]>([]);
+  const [sujetFichierPreview, setSujetFichierPreview] = useState<Record<string, { base64: string; mime_type: string; nom_fichier: string } | null>>({});
   const [installFichiers, setInstallFichiers] = useState<InstallFichier[]>([]);
   const [installUploadFile, setInstallUploadFile] = useState<File | null>(null);
   const [installUploadTitre, setInstallUploadTitre] = useState("");
@@ -2079,24 +2073,25 @@ function DashboardPage({
     const fileInput = document.getElementById("accounts-csv-input") as HTMLInputElement | null;
     const file = fileInput?.files?.[0];
     if (!file) return;
-    const csvContent = await file.text();
-    const response = await apiFetch("/api/admin/accounts/bulk-csv/", {
+    const fichier_base64 = await readFileAsBase64(file);
+    const response = await apiFetch("/api/instructeur/sujet-fin-stage/upload/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csv_content: csvContent }),
+      body: JSON.stringify({
+        fichier_base64,
+        nom_fichier: file.name,
+        mime_type: file.type || "application/octet-stream",
+        titre: file.name.replace(/\.docx$/i, ""),
+      }),
     });
-    const result = await response.json();
     if (response.ok) {
-      const errNote = result.error_count ? ` (${result.error_count} lignes ignorees)` : "";
-      setActionMessage(`Import termine: ${result.created_count} comptes crees${errNote}.`);
-      setCsvErrors((result.errors as Array<{ line: number; error: string }>) ?? []);
-      await reloadAdminData();
-    } else if (result.errors?.length) {
-      setCsvErrors(result.errors as Array<{ line: number; error: string }>);
-      setActionMessage(`Import echoue — ${result.error_count ?? result.errors.length} erreur(s). Voir details ci-dessous.`);
-    } else {
+      setActionMessage("Fichier DOCX partagé avec succès.");
       setCsvErrors([]);
-      setActionMessage(result.detail ?? "Import echoue.");
+      if (fileInput) fileInput.value = "";
+      setCsvFileName("");
+    } else {
+      const result = await response.json().catch(() => ({}));
+      setActionMessage((result as { detail?: string }).detail ?? "Echec de l'upload.");
     }
   };
 
@@ -2145,6 +2140,16 @@ function DashboardPage({
     }
     setCorrectionFichierLoading((prev) => ({ ...prev, [controleId]: false }));
   };
+
+  const loadSujetFichiers = async () => {
+    const r = await apiFetch("/api/sujet-fin-stage/fichiers/");
+    if (r.ok) { const d: { fichiers: SujetFinStageFichierItem[] } = await r.json(); setSujetFichiers(d.fichiers); }
+  };
+
+  useEffect(() => {
+    if (stageaireView === "sujet") void loadSujetFichiers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageaireView]);
 
   const loadInstallFichiers = async () => {
     const r = await apiFetch("/api/installation-logiciels/fichiers/");
@@ -3328,7 +3333,7 @@ function DashboardPage({
                   <button
                     key={tab}
                     type="button"
-                    onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); void loadInstallFichiers(); }}
+                    onClick={() => { setStageaireView(tab); setSelectedModule(null); setSelectedMatiere(null); setSelectedBrochure(null); setSelectedCours(null); setCoursFileCache({}); setDetailControleId(null); setDetailControlePdf(null); void loadInstallFichiers(); if (tab === "sujet") void loadSujetFichiers(); }}
                     className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold transition text-left"
                     style={{ background: active ? "#1C352D" : "transparent", color: active ? "white" : "#1C352D" }}
                   >
@@ -4364,82 +4369,96 @@ function DashboardPage({
             {/* ── SUJET FIN DE STAGE ── */}
             {stageaireView === "sujet" ? (
               <article className="rounded-2xl border border-app-muted bg-white shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-app-muted/60" style={{ background: "#1C352D" }}>
-                  <h3 className="font-bold text-white">Sujet de fin de stage</h3>
-                  <p className="mt-0.5 text-xs text-white/50">Votre sujet de recherche et encadrant assigné.</p>
+                <div className="px-6 py-4 border-b border-app-muted/60 flex items-center justify-between" style={{ background: "#1C352D" }}>
+                  <div>
+                    <h3 className="font-bold text-white">Documents partagés</h3>
+                    <p className="mt-0.5 text-xs text-white/50">Sujets et documents mis à disposition par l'administration.</p>
+                  </div>
+                  <button type="button" onClick={() => void loadSujetFichiers()} className="flex items-center gap-1 rounded-lg border border-white/20 px-2.5 py-1 text-xs font-semibold text-white/80 hover:bg-white/10 transition">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    Actualiser
+                  </button>
                 </div>
                 <div className="p-6">
-                  {stageaireData.sujet_fin_stage ? (
-                    <div className="space-y-4">
-                      {/* Status badge */}
-                      <div className="flex items-center gap-3">
-                        <span className="rounded-full px-3 py-1 text-xs font-bold text-white" style={{ background: stageaireData.sujet_fin_stage.etat === "EN_COURS" ? "#A6B28B" : stageaireData.sujet_fin_stage.etat === "TERMINE" ? "#22c55e" : "#ef4444" }}>
-                          {stageaireData.sujet_fin_stage.etat.replace("_", " ")}
-                        </span>
-                        {stageaireData.sujet_fin_stage.date_affectation && (
-                          <span className="text-xs text-app-dark/40">Affecté le {new Date(stageaireData.sujet_fin_stage.date_affectation).toLocaleDateString("fr-FR")}</span>
-                        )}
-                      </div>
-                      {/* Title */}
-                      <div className="rounded-xl border border-app-muted/60 bg-app-soft/50 p-5">
-                        <p className="text-lg font-bold text-app-dark">{stageaireData.sujet_fin_stage.titre}</p>
-                        {stageaireData.sujet_fin_stage.description && (
-                          <p className="mt-3 text-sm text-app-dark/70 whitespace-pre-wrap leading-relaxed">{stageaireData.sujet_fin_stage.description}</p>
-                        )}
-                      </div>
-                      {/* Encadrant */}
-                      <div className="flex items-center gap-3 rounded-xl border border-app-muted/60 bg-white px-4 py-3">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ background: "#1C352D" }}>
-                          {stageaireData.sujet_fin_stage.encadrant.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-xs text-app-dark/40">Encadrant</p>
-                          <p className="font-semibold text-app-dark">{stageaireData.sujet_fin_stage.encadrant}</p>
-                        </div>
-                      </div>
-                      {/* Fichier Word partagé */}
-                      {stageaireData.sujet_fin_stage.has_fichier_word && (
-                        <div className="rounded-xl border border-blue-200 bg-blue-50/50 px-4 py-3 flex items-center gap-3">
-                          <svg className="h-8 w-8 shrink-0 text-blue-500" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                          </svg>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-blue-600/70">Fichier Word partagé par votre encadrant</p>
-                            <p className="text-sm font-semibold text-app-dark truncate">{stageaireData.sujet_fin_stage.nom_fichier_word || "document.docx"}</p>
-                          </div>
-                          <button
-                            type="button"
-                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-90"
-                            style={{ background: "#1C352D" }}
-                            onClick={async () => {
-                              const res = await apiFetch(`/api/sujets/${stageaireData.sujet_fin_stage!.sujet_id}/fichier-word/`);
-                              if (!res.ok) return;
-                              const data = await res.json() as { fichier_base64: string; nom_fichier: string; mime_type: string };
-                              const bytes = Uint8Array.from(atob(data.fichier_base64), (c) => c.charCodeAt(0));
-                              const url = URL.createObjectURL(new Blob([bytes], { type: data.mime_type }));
-                              const a = document.createElement("a"); a.href = url; a.download = data.nom_fichier; a.click();
-                              URL.revokeObjectURL(url);
-                            }}
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            Télécharger Word
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
+                  {sujetFichiers.length === 0 ? (
                     <div className="flex flex-col items-center gap-4 py-12 text-center">
                       <div className="flex h-16 w-16 items-center justify-center rounded-full" style={{ background: "rgba(28,53,45,0.06)" }}>
                         <svg className="h-8 w-8 text-app-dark/25" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                       </div>
-                      <div>
-                        <p className="font-semibold text-app-dark/50">Aucun sujet affecté</p>
-                        <p className="mt-1 text-xs text-app-dark/35 max-w-xs">Votre sujet de fin de stage apparaîtra ici une fois qu'un encadrant vous l'aura assigné.</p>
-                      </div>
+                      <p className="text-sm text-app-dark/40">Aucun document partagé pour le moment.</p>
                     </div>
-                  )}
+                  ) : (
+                      <div className="space-y-3">
+                        {sujetFichiers.map((f) => {
+                          const preview = sujetFichierPreview[f.id];
+                          const isPdf = f.mime_type === "application/pdf" || f.nom_fichier.toLowerCase().endsWith(".pdf");
+                          const isDocx = f.mime_type.includes("wordprocessingml") || f.nom_fichier.toLowerCase().endsWith(".docx");
+                          return (
+                            <div key={f.id} className="rounded-xl border border-app-muted overflow-hidden">
+                              <div className="bg-app-soft/40 px-4 py-3 flex items-center gap-3">
+                                <svg className="h-7 w-7 shrink-0 text-app-dark/40" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-app-dark truncate">{f.titre || f.nom_fichier}</p>
+                                  <p className="text-xs text-app-dark/40">{f.nom_fichier}</p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-bold text-app-dark transition hover:bg-app-soft"
+                                    onClick={async () => {
+                                      if (preview) { setSujetFichierPreview((p) => ({ ...p, [f.id]: null })); return; }
+                                      const res = await apiFetch(`/api/sujet-fin-stage/fichiers/${f.id}/`);
+                                      if (!res.ok) return;
+                                      const data = await res.json() as { fichier_base64: string; nom_fichier: string; mime_type: string };
+                                      setSujetFichierPreview((p) => ({ ...p, [f.id]: { base64: data.fichier_base64, mime_type: data.mime_type, nom_fichier: data.nom_fichier } }));
+                                    }}
+                                  >
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                    </svg>
+                                    {preview ? "Fermer" : "Voir"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:opacity-90"
+                                    style={{ background: "#1C352D" }}
+                                    onClick={async () => {
+                                      const src = preview ?? await apiFetch(`/api/sujet-fin-stage/fichiers/${f.id}/`).then(async (r) => r.ok ? r.json() as Promise<{ fichier_base64: string; nom_fichier: string; mime_type: string }> : null);
+                                      if (!src) return;
+                                      const b64 = "base64" in src ? src.base64 : (src as { fichier_base64: string }).fichier_base64;
+                                      const mime = "mime_type" in src ? src.mime_type : f.mime_type;
+                                      const nom = "nom_fichier" in src ? src.nom_fichier : f.nom_fichier;
+                                      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+                                      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+                                      const a = document.createElement("a"); a.href = url; a.download = nom; a.click();
+                                      URL.revokeObjectURL(url);
+                                    }}
+                                  >
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                    Télécharger
+                                  </button>
+                                </div>
+                              </div>
+                              {preview && (
+                                <div className="border-t border-app-muted">
+                                  {isPdf ? (
+                                    <InlinePdfViewer base64={preview.base64} name={preview.nom_fichier} />
+                                  ) : isDocx ? (
+                                    <InlineDocxViewer base64={preview.base64} name={preview.nom_fichier} />
+                                  ) : (
+                                    <p className="p-4 text-xs text-app-dark/50">Aperçu non disponible pour ce type de fichier.</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                 </div>
               </article>
             ) : null}
@@ -4912,14 +4931,6 @@ function DashboardPage({
                 <PanelSection title="Gestion de la plateforme">
                   <AdminPlatformChart platform={{ ...adminData.platform, users_total: adminData.users.filter(u => u.role === "Stagiaire").length }} />
                 </PanelSection>
-
-                {/* ── Statistiques rapides par rôle ── */}
-                <PanelSection title="Statistiques rapides par rôle">
-                  <AdminRoleChart
-                    users={adminData.users}
-                    onRoleClick={(role) => { setAdminView("users"); setSelectedAdminUser(null); setAdminUserRoleFilter(role); setAdminUsersExpanded(true); setAdminUsersPage(1); }}
-                  />
-                </PanelSection>
               </div>
             ) : null}
 
@@ -5286,8 +5297,8 @@ function DashboardPage({
             {(adminView === "accounts" || adminView === "bulk_csv") ? (
               <div className="grid gap-6">
                 <PanelSection
-                  title={adminView === "bulk_csv" ? "Import CSV (bulk)" : "Gestion des comptes"}
-                  subtitle={adminView === "bulk_csv" ? "Importez plusieurs comptes en une seule operation via un fichier CSV." : "Creer des comptes pour tous les roles ou importer en masse par CSV."}
+                  title={adminView === "bulk_csv" ? "Sujets fin de stage" : "Gestion des comptes"}
+                  subtitle={adminView === "bulk_csv" ? "Partagez un document DOCX avec les stagiaires." : "Creer des comptes pour tous les roles ou importer en masse par CSV."}
                 />
 
                 {adminView !== "bulk_csv" && <>
@@ -5435,17 +5446,11 @@ function DashboardPage({
                 )}
                 </>}
 
-                <SubCard title="Import CSV (bulk)">
-                  <p className="mt-1 text-xs text-app-dark/70">
-                    Headers attendus: username,email,password,role,matricule,est_civil,corps_id,rank_id,speciality_id
-                  </p>
-                  <p className="mt-1 text-xs text-app-dark/50">
-                    Roles valides: Instructeur, Stagiaire, Coordinateur, Admin. Pour Instructeur civil: est_civil=true, laisser corps/rank/speciality vides.
-                  </p>
+                <SubCard title="Partager un document DOCX">
                   <form className="mt-3 grid gap-3" onSubmit={handleBulkCsvUpload}>
                     <input
                       id="accounts-csv-input"
-                      accept=".csv,text/csv"
+                      accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
                       className="rounded border border-app-muted bg-white px-3 py-2 text-sm"
                       onChange={(event) => setCsvFileName(event.target.files?.[0]?.name ?? "")}
                       type="file"
@@ -5453,7 +5458,7 @@ function DashboardPage({
                     />
                     {csvFileName ? <p className="text-xs text-app-dark/70">Fichier: {csvFileName}</p> : null}
                     <button className="rounded bg-app-dark px-3 py-2 text-sm font-semibold text-white" type="submit">
-                      Importer les comptes
+                      Partager le fichier
                     </button>
                   </form>
                   {csvErrors.length > 0 && (
@@ -6436,15 +6441,3 @@ function App() {
 }
 
 export default App;
-
-
-
-
-
-
-
-
-
-
-
-
