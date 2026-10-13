@@ -2,6 +2,21 @@
 import type { FormEvent, ReactNode } from "react";
 import PdfViewer, { InlinePdfViewer, InlineDocxViewer } from "./PdfViewer";
 import { useTranslation } from "react-i18next";
+import {
+  Bell,
+  BookOpen,
+  CalendarRange,
+  ChevronDown,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  ShieldCheck,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import Alert from "@mui/material/Alert";
 import Button from "@mui/material/Button";
 import InputAdornment from "@mui/material/InputAdornment";
@@ -106,6 +121,7 @@ type AdminDashboardData = {
     id: number;
     username: string;
     email: string;
+    matricule: string;
     is_active: boolean;
     role: string;
   }>;
@@ -232,30 +248,69 @@ function Layout({
   const { t } = useTranslation();
 
   return (
-    <div className="min-h-screen bg-app-soft text-app-dark">
-      <header className="sticky top-0 z-20 border-b border-app-muted/60 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
-          <Link className="flex items-center gap-2.5 text-lg font-semibold tracking-tight text-app-dark" to="/">
-            <img
-              src="/logo.png"
-              alt="Logo"
-              className="h-10 w-10 object-contain"
-            />
-            <span>{t("nav.brand")}</span>
-          </Link>
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3 lg:px-6">
+          <div className="flex items-center gap-3">
+            <Link className="flex items-center gap-3 text-lg font-semibold tracking-tight text-slate-900" to="/">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm shadow-indigo-600/20">
+                <LayoutDashboard className="h-5 w-5" />
+              </div>
+              <span>{t("nav.brand")}</span>
+            </Link>
+          </div>
+
+          <div className="hidden items-center gap-3 xl:flex">
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event("admin:quick-search"))}
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500 shadow-sm"
+            >
+              <Search className="h-4 w-4 text-slate-400" />
+              <span>Recherche rapide</span>
+              <span className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">Ctrl K</span>
+            </button>
+          </div>
+
           <nav className="flex items-center gap-2">
             {!user ? (
-              <>
-                <HeaderLink to="/login">{t("nav.login")}</HeaderLink>
-              </>
+              <HeaderLink to="/login">{t("nav.login")}</HeaderLink>
             ) : (
               <>
+                <div className="hidden items-center gap-2 md:flex">
+                  <button
+                    type="button"
+                    className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+                    aria-label="Notifications"
+                  >
+                    <Bell className="h-4 w-4" />
+                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white" />
+                  </button>
+                </div>
+
                 <HeaderLink to="/dashboard">
                   {user.role === "Admin" ? t("workspace.Admin.title") : t("nav.dashboard")}
                 </HeaderLink>
-                <Button onClick={onLogout} size="small" sx={{ textTransform: "none", fontWeight: 600 }} variant="text">
-                  {t("nav.logout")}
-                </Button>
+
+                <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2 py-1.5 shadow-sm">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-100 font-semibold text-indigo-700">
+                    {user.username.slice(0, 1).toUpperCase()}
+                  </div>
+                  <div className="hidden text-left sm:block">
+                    <p className="text-sm font-semibold text-slate-800">{user.username}</p>
+                    <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">{user.role}</p>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-slate-500" />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:text-red-600"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span className="hidden sm:inline">{t("nav.logout")}</span>
+                </button>
               </>
             )}
           </nav>
@@ -268,9 +323,46 @@ function Layout({
 
 function HeaderLink({ to, children }: { to: string; children: string }) {
   return (
-    <Button component={NavLink} size="small" sx={{ textTransform: "none", fontWeight: 600 }} to={to} variant="text">
+    <Button component={NavLink} size="small" sx={{ textTransform: "none", fontWeight: 700, borderRadius: 12 }} to={to} variant="text">
       {children}
     </Button>
+  );
+}
+
+function SidebarNavItem({
+  active,
+  collapsed,
+  icon: Icon,
+  label,
+  badge,
+  onClick,
+}: {
+  active: boolean;
+  collapsed: boolean;
+  icon: typeof LayoutDashboard;
+  label: string;
+  badge?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+        active
+          ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/20"
+          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+      } ${collapsed ? "justify-center" : ""}`}
+      title={collapsed ? label : undefined}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {!collapsed && <span className="truncate">{label}</span>}
+      {!collapsed && badge !== undefined && badge > 0 ? (
+        <span className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"}`}>
+          {badge}
+        </span>
+      ) : null}
+    </button>
   );
 }
 
@@ -865,9 +957,9 @@ function ReferenceManagementSection({
 }: ReferenceManagementSectionProps) {
   return (
     <div className="grid gap-6">
-      <PanelSection title="Corps, ranks et specialities">
+      <PanelSection title="Corps, grades et spécialités">
         <p className="text-sm text-app-dark/70">
-          Gérez les corps, grades et spécialités militaires. Ces données sont créées et administrées par l'administrateur.
+          Gérez les corps, grades et spécialités militaires. Ces données sont créées et administrées par l’administrateur.
         </p>
       </PanelSection>
 
@@ -876,10 +968,10 @@ function ReferenceManagementSection({
           Corps
         </TabButton>
         <TabButton active={referenceTab === "ranks"} onClick={() => setReferenceTab("ranks")}>
-          Ranks
+          Grades
         </TabButton>
         <TabButton active={referenceTab === "specialities"} onClick={() => setReferenceTab("specialities")}>
-          Specialities
+          Spécialités
         </TabButton>
       </div>
 
@@ -887,9 +979,9 @@ function ReferenceManagementSection({
         <SubCard title="Corps">
           <form className="grid gap-2" onSubmit={handleCreateCorps}>
             <Input label="Code" value={newCorps.code} onChange={(value) => setNewCorps((prev) => ({ ...prev, code: value }))} />
-            <Input label="Libelle" value={newCorps.label} onChange={(value) => setNewCorps((prev) => ({ ...prev, label: value }))} />
+            <Input label="Libellé" value={newCorps.label} onChange={(value) => setNewCorps((prev) => ({ ...prev, label: value }))} />
             <button className="rounded bg-app-dark px-3 py-2 text-xs font-semibold text-white" type="submit">
-              Ajouter corp
+              Ajouter un corps
             </button>
           </form>
           <div className="mt-3 space-y-2">
@@ -902,24 +994,24 @@ function ReferenceManagementSection({
                 </div>
               </div>
             ))}
-            {referencesData.corps.length === 0 ? <EmptyState message="Aucun corp." /> : null}
+            {referencesData.corps.length === 0 ? <EmptyState message="Aucun corps." /> : null}
           </div>
         </SubCard>
       ) : null}
 
       {referenceTab === "ranks" ? (
-        <SubCard title="Ranks">
+        <SubCard title="Grades">
           <form className="grid gap-2" onSubmit={handleCreateRank}>
             <Input label="Code" value={newRank.code} onChange={(value) => setNewRank((prev) => ({ ...prev, code: value }))} />
-            <Input label="Libelle" value={newRank.label} onChange={(value) => setNewRank((prev) => ({ ...prev, label: value }))} />
+            <Input label="Libellé" value={newRank.label} onChange={(value) => setNewRank((prev) => ({ ...prev, label: value }))} />
             <label className="grid gap-1 text-sm font-medium text-app-dark">
-              Corp
+              Corps
               <select
                 className="rounded border border-app-muted bg-white px-3 py-2"
                 onChange={(event) => setNewRank((prev) => ({ ...prev, corps_id: event.target.value }))}
                 value={newRank.corps_id}
               >
-                <option value="">Selectionner</option>
+                <option value="">Sélectionner</option>
                 {referencesData.corps.map((corp) => (
                   <option key={corp.id} value={corp.id}>
                     {corp.label}
@@ -928,7 +1020,7 @@ function ReferenceManagementSection({
               </select>
             </label>
             <button className="rounded bg-app-dark px-3 py-2 text-xs font-semibold text-white" type="submit">
-              Ajouter rank
+              Ajouter un grade
             </button>
           </form>
           <div className="mt-3 space-y-2">
@@ -941,24 +1033,24 @@ function ReferenceManagementSection({
                 </div>
               </div>
             ))}
-            {referencesData.ranks.length === 0 ? <EmptyState message="Aucun rank." /> : null}
+            {referencesData.ranks.length === 0 ? <EmptyState message="Aucun grade." /> : null}
           </div>
         </SubCard>
       ) : null}
 
       {referenceTab === "specialities" ? (
-        <SubCard title="Specialities">
+        <SubCard title="Spécialités">
           <form className="grid gap-2" onSubmit={handleCreateSpeciality}>
             <Input label="Code" value={newSpeciality.code} onChange={(value) => setNewSpeciality((prev) => ({ ...prev, code: value }))} />
-            <Input label="Libelle" value={newSpeciality.label} onChange={(value) => setNewSpeciality((prev) => ({ ...prev, label: value }))} />
+            <Input label="Libellé" value={newSpeciality.label} onChange={(value) => setNewSpeciality((prev) => ({ ...prev, label: value }))} />
             <label className="grid gap-1 text-sm font-medium text-app-dark">
-              Corp (optionnel)
+              Corps (facultatif)
               <select
                 className="rounded border border-app-muted bg-white px-3 py-2"
                 onChange={(event) => setNewSpeciality((prev) => ({ ...prev, corps_id: event.target.value }))}
                 value={newSpeciality.corps_id}
               >
-                <option value="">Selectionner</option>
+                <option value="">Sélectionner</option>
                 {referencesData.corps.map((corp) => (
                   <option key={corp.id} value={corp.id}>
                     {corp.label}
@@ -967,7 +1059,7 @@ function ReferenceManagementSection({
               </select>
             </label>
             <button className="rounded bg-app-dark px-3 py-2 text-xs font-semibold text-white" type="submit">
-              Ajouter speciality
+              Ajouter une spécialité
             </button>
           </form>
           <div className="mt-3 space-y-2">
@@ -983,7 +1075,7 @@ function ReferenceManagementSection({
                 </div>
               </div>
             ))}
-            {referencesData.specialities.length === 0 ? <EmptyState message="Aucune speciality." /> : null}
+            {referencesData.specialities.length === 0 ? <EmptyState message="Aucune spécialité." /> : null}
           </div>
         </SubCard>
       ) : null}
@@ -1361,6 +1453,8 @@ function DashboardPage({
   const [coordinateurView, setCoordinateurView] = useState<"dashboard" | "gestion" | "reporting" | "export">("dashboard");
   const [coordNotifDismissed, setCoordNotifDismissed] = useState(false);
   const [adminView, setAdminView] = useState<"overview" | "users" | "accounts" | "bulk_csv" | "subjects" | "references" | "events" | "fichiers_renseignement" | "modules" | "feuille_redaction">("overview");
+  const [adminSidebarCollapsed, setAdminSidebarCollapsed] = useState(false);
+  const [quickSearchPending, setQuickSearchPending] = useState(false);
   const [selectedAdminUser, setSelectedAdminUser] = useState<AdminDashboardData["users"][number] | null>(null);
   const [subjects, setSubjects] = useState<SubjectData[]>([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>("");
@@ -1377,6 +1471,7 @@ function DashboardPage({
   const [adminUsersExpanded, setAdminUsersExpanded] = useState(false);
   const [adminUserRoleFilter, setAdminUserRoleFilter] = useState<string | null>(null);
   const [adminStatusFilter, setAdminStatusFilter] = useState<"tous" | "actif" | "inactif">("tous");
+  const [massActionConfirm, setMassActionConfirm] = useState<"activate" | "deactivate" | null>(null);
   const [adminUserSort, setAdminUserSort] = useState<"az" | "za" | "recent">("az");
   const [adminUsersPage, setAdminUsersPage] = useState(1);
   const ADMIN_USERS_PER_PAGE = 10;
@@ -1408,6 +1503,9 @@ function DashboardPage({
   const [stagiaireFichierUploading, setStagiaireFichierUploading] = useState(false);
   const [csvFileName, setCsvFileName] = useState("");
   const [csvErrors, setCsvErrors] = useState<Array<{ line: number; error: string }>>([]);
+  const [userImportFile, setUserImportFile] = useState<File | null>(null);
+  const [userImportErrors, setUserImportErrors] = useState<Array<{ line: number; error: string }>>([]);
+  const [userImporting, setUserImporting] = useState(false);
   const [referencesData, setReferencesData] = useState<{
     corps: ReferenceCorp[];
     ranks: ReferenceRank[];
@@ -1471,9 +1569,9 @@ function DashboardPage({
               : t("titles.adminSubjects");
       }
       if (adminView === "references") {
-        suffix = referenceTab === "corps" ? "References - Corps" : referenceTab === "ranks" ? "References - Ranks" : "References - Specialities";
+        suffix = referenceTab === "corps" ? "Références - Corps" : referenceTab === "ranks" ? "Références - Grades" : "Références - Spécialités";
       }
-      if (adminView === "events") suffix = "Events";
+      if (adminView === "events") suffix = "Événements";
       document.title = `${t("titles.adminWorkspace")} - ${suffix}`;
       return;
     }
@@ -1481,6 +1579,33 @@ function DashboardPage({
     if (user.role === "Stagiaire") document.title = `${t("titles.traineeDashboard")} - ${t("titles.appName")}`;
     if (user.role === "Coordinateur") document.title = `${t("titles.coordinatorDashboard")} - ${t("titles.appName")}`;
   }, [user, adminView, selectedAdminUser, subjectTab, referenceTab, t]);
+
+  useEffect(() => {
+    const openQuickSearch = () => {
+      if (user?.role !== "Admin") return;
+      setAdminView("users");
+      setSelectedAdminUser(null);
+      setQuickSearchPending(true);
+    };
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        openQuickSearch();
+      }
+    };
+    window.addEventListener("admin:quick-search", openQuickSearch);
+    window.addEventListener("keydown", onShortcut);
+    return () => {
+      window.removeEventListener("admin:quick-search", openQuickSearch);
+      window.removeEventListener("keydown", onShortcut);
+    };
+  }, [user?.role]);
+
+  useEffect(() => {
+    if (!quickSearchPending || adminView !== "users") return;
+    document.getElementById("admin-user-search")?.focus();
+    setQuickSearchPending(false);
+  }, [adminView, quickSearchPending]);
 
   const loadDashboard = async () => {
     if (!user) return;
@@ -1957,6 +2082,76 @@ function DashboardPage({
       });
       await reloadAdminData();
     }
+  };
+
+  const handleImportUsers = async () => {
+    if (!userImportFile) return;
+    setUserImporting(true);
+    const formData = new FormData();
+    formData.append("file", userImportFile);
+    const response = await apiFetch("/api/admin/accounts/bulk-csv/", {
+      method: "POST",
+      body: formData,
+    });
+    const result: { created_count?: number; error_count?: number; detail?: string; errors?: Array<{ line: number; error: string }> } = await response.json().catch(() => ({}));
+    setUserImporting(false);
+    if (response.ok) {
+      if ((result.error_count ?? 0) > 0) {
+        setDashboardError(`Import partiel : ${result.error_count} ligne(s) ignorée(s). Consultez le détail ci-dessous.`);
+      } else {
+        setActionMessage(`Import utilisateurs terminé : ${result.created_count ?? 0} compte(s) créé(s).`);
+      }
+      setUserImportFile(null);
+      setUserImportErrors(result.errors ?? []);
+      await reloadAdminData();
+      return;
+    }
+    setDashboardError(result.detail ?? "Échec de l'import des utilisateurs.");
+    setUserImportErrors(result.errors ?? []);
+  };
+
+  const getFilteredAdminUsers = () => {
+    const query = adminUserSearch.trim().toLocaleLowerCase();
+    return (adminData?.users ?? []).filter((account) => {
+      if (adminUserRoleFilter && account.role !== adminUserRoleFilter) return false;
+      if (adminStatusFilter === "actif" && !account.is_active) return false;
+      if (adminStatusFilter === "inactif" && account.is_active) return false;
+      if (query && ![account.username, account.email, account.matricule, account.role]
+        .some((value) => (value ?? "").toLocaleLowerCase().includes(query))) return false;
+      return true;
+    }).sort((a, b) => {
+      if (adminUserSort === "za") return b.username.localeCompare(a.username);
+      if (adminUserSort === "recent") return b.id - a.id;
+      return a.username.localeCompare(b.username);
+    });
+  };
+
+  const exportFilteredAdminUsers = () => {
+    const quote = (value: string | number) => {
+      const rawValue = String(value);
+      const safeValue = /^[=+\-@]/.test(rawValue) ? `'${rawValue}` : rawValue;
+      return `"${safeValue.replaceAll('"', '""')}"`;
+    };
+    const rows = getFilteredAdminUsers().map((account) => [
+      account.username,
+      account.email,
+      account.matricule,
+      account.role,
+      account.is_active ? "Actif" : "Inactif",
+    ]);
+    const csv = [
+      ["Username", "Email", "Matricule", "Rôle", "Statut"],
+      ...rows,
+    ].map((row) => row.map(quote).join(",")).join("\r\n");
+    const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "utilisateurs_filtres.csv";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    setActionMessage(`${rows.length} utilisateur(s) exporté(s).`);
   };
 
   const handleCreateCorps = async (event: FormEvent<HTMLFormElement>) => {
@@ -2568,6 +2763,58 @@ function DashboardPage({
           {toastState.message}
         </div>
       ) : null}
+
+      {massActionConfirm && adminData ? (() => {
+        const targets = adminData.users.filter((account) =>
+          (massActionConfirm === "activate" ? !account.is_active : account.is_active && account.id !== user.id)
+          && (!adminUserRoleFilter || account.role === adminUserRoleFilter),
+        );
+        const isDeactivation = massActionConfirm === "deactivate";
+        return (
+          <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4" role="presentation" onClick={() => setMassActionConfirm(null)}>
+            <section
+              aria-labelledby="mass-action-title"
+              aria-modal="true"
+              className="modal-panel w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+              role="dialog"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h2 className="text-lg font-semibold text-slate-900" id="mass-action-title">
+                {isDeactivation ? "Désactiver des comptes ?" : "Activer des comptes ?"}
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">
+                {targets.length} compte(s) {isDeactivation ? "seront désactivés" : "seront activés"}
+                {adminUserRoleFilter ? ` pour le rôle ${adminUserRoleFilter}` : ""}. Cette action peut être annulée en relançant l’action inverse.
+              </p>
+              <div className="mt-6 flex justify-end gap-2">
+                <button type="button" className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => setMassActionConfirm(null)}>
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={targets.length === 0}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${isDeactivation ? "bg-red-600 hover:bg-red-700" : "bg-indigo-600 hover:bg-indigo-700"}`}
+                  onClick={() => {
+                    void (async () => {
+                      const results = await Promise.all(targets.map((account) => apiFetch(`/api/admin/users/${account.id}/toggle-active/`, { method: "POST" })));
+                      setMassActionConfirm(null);
+                      if (results.every((response) => response.ok)) {
+                        setActionMessage(`${targets.length} compte(s) ${isDeactivation ? "désactivé(s)" : "activé(s)"}.`);
+                        await loadDashboard();
+                      } else {
+                        await loadDashboard();
+                        setDashboardError("Certaines modifications de comptes ont échoué.");
+                      }
+                    })();
+                  }}
+                >
+                  Confirmer
+                </button>
+              </div>
+            </section>
+          </div>
+        );
+      })() : null}
 
       {user.role === "Instructeur" && instructeurData ? (
         <section className="mt-6 grid gap-5 md:grid-cols-[220px_1fr]">
@@ -4840,18 +5087,28 @@ function DashboardPage({
       ) : null}
 
       {user.role === "Admin" && adminData ? (
-        <section className="mt-6 grid gap-5 md:grid-cols-[220px_1fr]">
-          <aside className="sidebar-animated card-hover rounded-2xl border border-app-muted bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-app-accent">{t("admin.panelTitle")}</p>
-            <div className="mt-3 grid gap-1">
-              <AdminNavButton active={adminView === "overview"} onClick={() => { setAdminView("overview"); setSelectedAdminUser(null); }}>
-                {t("admin.navOverview")}
-              </AdminNavButton>
+        <section className={`mt-6 grid gap-5 ${adminSidebarCollapsed ? "md:grid-cols-[88px_1fr]" : "md:grid-cols-[260px_1fr]"}`}>
+          <aside className="sidebar-animated rounded-2xl border border-slate-200 bg-white p-3 shadow-sm shadow-slate-200/60">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              {!adminSidebarCollapsed && (
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-indigo-600">{t("admin.panelTitle")}</p>
+              )}
+              <button
+                type="button"
+                aria-label="Toggle sidebar"
+                onClick={() => setAdminSidebarCollapsed((v) => !v)}
+                className="ml-auto flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:border-indigo-200 hover:text-indigo-600"
+              >
+                {adminSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              </button>
+            </div>
+            <div className="grid gap-1.5">
+              <SidebarNavItem active={adminView === "overview"} collapsed={adminSidebarCollapsed} icon={LayoutDashboard} label={t("admin.navOverview")} onClick={() => { setAdminView("overview"); setSelectedAdminUser(null); }} />
 
               {/* Users — collapsible */}
               <div>
                 <button
-                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${adminView === "users" ? "bg-app-dark text-white" : "border border-app-dark text-app-dark hover:bg-app-soft"}`}
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${adminView === "users" ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/20" : "border border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"} ${adminSidebarCollapsed ? "justify-center" : ""}`}
                   onClick={() => {
                     setAdminUsersExpanded((v) => !v);
                     setAdminView("users");
@@ -4860,26 +5117,26 @@ function DashboardPage({
                     setAdminUsersPage(1);
                   }}
                   type="button"
+                  title={adminSidebarCollapsed ? "Utilisateurs" : undefined}
                 >
-                  <span>{t("admin.navUsers")}</span>
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className={`h-3.5 w-3.5 transition-transform ${adminUsersExpanded ? "rotate-180" : ""}`}
-                    fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <span className="flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    {!adminSidebarCollapsed && <span>{t("admin.navUsers")}</span>}
+                  </span>
+                  {!adminSidebarCollapsed && (
+                    <ChevronDown className={`h-4 w-4 transition-transform ${adminUsersExpanded ? "rotate-180" : ""}`} />
+                  )}
                 </button>
 
-                {adminUsersExpanded && (
-                  <div className="ml-3 mt-1 grid gap-0.5 border-l-2 border-app-muted pl-3">
+                {adminUsersExpanded && !adminSidebarCollapsed && (
+                  <div className="ml-3 mt-1 grid gap-0.5 border-l-2 border-slate-200 pl-3">
                     {(["Stagiaire", "Instructeur", "Coordinateur", "Admin"] as const).map((role) => {
                       const count = adminData.users.filter((u) => u.role === role).length;
                       const isActive = adminView === "users" && adminUserRoleFilter === role;
                       return (
                         <button
                           key={role}
-                          className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium transition ${isActive ? "bg-app-dark text-white" : "text-app-dark/70 hover:bg-app-soft"}`}
+                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs font-medium transition ${isActive ? "bg-indigo-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}
                           onClick={() => {
                             setAdminView("users");
                             setSelectedAdminUser(null);
@@ -4889,7 +5146,7 @@ function DashboardPage({
                           type="button"
                         >
                           <span>{role}s</span>
-                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${isActive ? "bg-white/20 text-white" : "bg-app-muted text-app-dark/60"}`}>
+                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"}`}>
                             {count}
                           </span>
                         </button>
@@ -4899,29 +5156,13 @@ function DashboardPage({
                 )}
               </div>
 
-              <AdminNavButton active={adminView === "modules"} onClick={() => { setAdminView("modules"); setAdminSelectedModule(null); setSelectedAdminUser(null); }}>
-                Modules
-              </AdminNavButton>
-
-              <AdminNavButton active={adminView === "accounts"} onClick={() => { setAdminView("accounts"); setSelectedAdminUser(null); }}>
-                {t("admin.navAccounts")}
-              </AdminNavButton>
-              <AdminNavButton active={adminView === "bulk_csv"} onClick={() => { setAdminView("bulk_csv"); setSelectedAdminUser(null); }}>
-                Sujets fin stage
-              </AdminNavButton>
-
-              <AdminNavButton active={adminView === "references"} onClick={() => { setAdminView("references"); setSelectedAdminUser(null); }}>
-                References
-              </AdminNavButton>
-              <AdminNavButton active={adminView === "events"} onClick={() => { setAdminView("events"); setSelectedAdminUser(null); }}>
-                Events
-              </AdminNavButton>
-              <AdminNavButton active={adminView === "fichiers_renseignement"} onClick={() => { setAdminView("fichiers_renseignement"); setSelectedAdminUser(null); }}>
-                Fichiers de renseignement
-              </AdminNavButton>
-              <AdminNavButton active={adminView === "feuille_redaction"} onClick={() => { setAdminView("feuille_redaction"); setSelectedAdminUser(null); void loadFeuilleRFichiers(); }}>
-                Feuille de rédaction
-              </AdminNavButton>
+              <SidebarNavItem active={adminView === "modules"} collapsed={adminSidebarCollapsed} icon={BookOpen} label="Modules" onClick={() => { setAdminView("modules"); setAdminSelectedModule(null); setSelectedAdminUser(null); }} />
+              <SidebarNavItem active={adminView === "accounts"} collapsed={adminSidebarCollapsed} icon={UserCheck} label={t("admin.navAccounts")} onClick={() => { setAdminView("accounts"); setSelectedAdminUser(null); }} />
+              <SidebarNavItem active={adminView === "bulk_csv"} collapsed={adminSidebarCollapsed} icon={FileText} label="Sujets fin stage" onClick={() => { setAdminView("bulk_csv"); setSelectedAdminUser(null); }} />
+              <SidebarNavItem active={adminView === "references"} collapsed={adminSidebarCollapsed} icon={ShieldCheck} label="References" onClick={() => { setAdminView("references"); setSelectedAdminUser(null); }} />
+              <SidebarNavItem active={adminView === "events"} collapsed={adminSidebarCollapsed} icon={CalendarRange} label="Events" onClick={() => { setAdminView("events"); setSelectedAdminUser(null); }} />
+              <SidebarNavItem active={adminView === "fichiers_renseignement"} collapsed={adminSidebarCollapsed} icon={FileText} label="Fichiers de renseignement" onClick={() => { setAdminView("fichiers_renseignement"); setSelectedAdminUser(null); }} />
+              <SidebarNavItem active={adminView === "feuille_redaction"} collapsed={adminSidebarCollapsed} icon={FileText} label="Feuille de rédaction" onClick={() => { setAdminView("feuille_redaction"); setSelectedAdminUser(null); void loadFeuilleRFichiers(); }} />
             </div>
           </aside>
 
@@ -4957,47 +5198,59 @@ function DashboardPage({
                 <div className="mt-3 rounded-xl border border-app-muted bg-app-soft px-4 py-3">
                   <p className="mb-2 text-xs font-bold uppercase tracking-wide text-app-dark/50">Actions de masse</p>
                   <div className="flex flex-wrap gap-2">
+                    <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft">
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls"
+                        className="hidden"
+                        onChange={(event) => {
+                          setUserImportFile(event.target.files?.[0] ?? null);
+                          setUserImportErrors([]);
+                        }}
+                      />
+                      {userImportFile ? userImportFile.name : "Importer Utilisateurs"}
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!userImportFile || userImporting}
+                      className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-green-50 hover:border-green-300 hover:text-green-700 disabled:opacity-50"
+                      onClick={() => void handleImportUsers()}
+                    >
+                      {userImporting ? "Import…" : "Valider import"}
+                    </button>
                     <button
                       type="button"
                       className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-green-50 hover:border-green-300 hover:text-green-700"
-                      onClick={async () => {
-                        const targets = adminData.users.filter((u) => !u.is_active && (!adminUserRoleFilter || u.role === adminUserRoleFilter));
-                        await Promise.all(targets.map((u) => apiFetch(`/api/admin/users/${u.id}/toggle-active/`, { method: "POST" })));
-                        await loadDashboard();
-                      }}
+                      onClick={() => setMassActionConfirm("activate")}
                     >
                       ✓ Activer tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
                     </button>
                     <button
                       type="button"
                       className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-red-50 hover:border-red-300 hover:text-red-700"
-                      onClick={async () => {
-                        const targets = adminData.users.filter((u) => u.is_active && u.id !== user.id && (!adminUserRoleFilter || u.role === adminUserRoleFilter));
-                        await Promise.all(targets.map((u) => apiFetch(`/api/admin/users/${u.id}/toggle-active/`, { method: "POST" })));
-                        await loadDashboard();
-                      }}
+                      onClick={() => setMassActionConfirm("deactivate")}
                     >
                       ✕ Désactiver tous {adminUserRoleFilter ? `les ${adminUserRoleFilter}s` : ""}
                     </button>
                     <button
                       type="button"
                       className="rounded-lg border border-app-muted bg-white px-3 py-1.5 text-xs font-semibold text-app-dark transition hover:bg-app-soft"
-                      onClick={() => {
-                        const rows = adminData.users
-                          .filter((u) => !adminUserRoleFilter || u.role === adminUserRoleFilter)
-                          .map((u) => `${u.username},${u.email ?? ""},${u.role},${u.is_active ? "Actif" : "Inactif"}`);
-                        const csv = ["Username,Email,Role,Statut", ...rows].join("\n");
-                        const blob = new Blob([csv], { type: "text/csv" });
-                        const a = document.createElement("a");
-                        a.href = URL.createObjectURL(blob);
-                        a.download = `utilisateurs${adminUserRoleFilter ? `_${adminUserRoleFilter}` : ""}.csv`;
-                        a.click();
-                      }}
+                      onClick={exportFilteredAdminUsers}
                     >
                       ↓ Exporter CSV
                     </button>
                   </div>
                 </div>
+                {userImportErrors.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3" role="alert">
+                    <p className="text-xs font-semibold text-red-800">{userImportErrors.length} erreur(s) d’import, avec numéros de ligne :</p>
+                    <ul className="mt-2 grid gap-1 text-xs text-red-700">
+                      {userImportErrors.map((error, index) => (
+                        <li key={`${error.line}-${index}`}>Ligne {error.line} : {error.error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 {/* Search */}
                 <div className="mt-3 flex items-center gap-2 rounded-lg border border-app-muted bg-app-soft px-3 py-2">
@@ -5005,8 +5258,9 @@ function DashboardPage({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
                   </svg>
                   <input
+                    id="admin-user-search"
                     className="w-full bg-transparent text-sm outline-none placeholder:text-app-dark/40"
-                    placeholder="Rechercher par username, email ou rôle…"
+                    placeholder="Rechercher par nom, email, matricule ou rôle…"
                     value={adminUserSearch}
                     onChange={(e) => { setAdminUserSearch(e.target.value); setAdminUsersPage(1); }}
                   />
@@ -5064,20 +5318,7 @@ function DashboardPage({
                 {/* Role groups with pagination */}
                 {(() => {
                   // Build the full filtered+sorted list across all roles
-                  const allFiltered = adminData.users.filter((u) => {
-                    if (adminUserRoleFilter && u.role !== adminUserRoleFilter) return false;
-                    if (adminStatusFilter === "actif" && !u.is_active) return false;
-                    if (adminStatusFilter === "inactif" && u.is_active) return false;
-                    if (adminUserSearch) {
-                      const q = adminUserSearch.toLowerCase();
-                      if (!u.username.toLowerCase().includes(q) && !(u.email ?? "").toLowerCase().includes(q)) return false;
-                    }
-                    return true;
-                  }).sort((a, b) => {
-                    if (adminUserSort === "za") return b.username.localeCompare(a.username);
-                    if (adminUserSort === "recent") return b.id - a.id;
-                    return a.username.localeCompare(b.username);
-                  });
+                  const allFiltered = getFilteredAdminUsers();
 
                   const totalFiltered = allFiltered.length;
                   const totalPages = Math.max(1, Math.ceil(totalFiltered / ADMIN_USERS_PER_PAGE));
@@ -5126,7 +5367,7 @@ function DashboardPage({
                                     {/* Info */}
                                     <div className="min-w-0 flex-1">
                                       <p className="truncate text-sm font-semibold text-app-dark">{u.username}</p>
-                                      <p className="truncate text-xs text-app-dark/50">{u.email || "—"}</p>
+                                      <p className="truncate text-xs text-app-dark/50">{u.email || "—"}{u.matricule ? ` · ${u.matricule}` : ""}</p>
                                     </div>
                                     {/* Status */}
                                     <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${u.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>

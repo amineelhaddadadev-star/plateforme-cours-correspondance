@@ -4,20 +4,24 @@
 
 @layer base {
   body {
-    @apply m-0 bg-app-soft font-sans text-app-dark antialiased;
+    @apply m-0 bg-slate-50 font-sans text-slate-900 antialiased;
   }
 
   * {
     @apply box-border;
   }
 
+  ::selection {
+    @apply bg-indigo-100 text-indigo-700;
+  }
+
   button {
-    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
   }
 
   button:hover {
     transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(28, 53, 45, 0.14);
+    box-shadow: 0 8px 20px rgba(79, 70, 229, 0.08);
   }
 
   button:active {
@@ -29,7 +33,7 @@
   }
 
   select:focus {
-    box-shadow: 0 0 0 3px rgba(166, 178, 139, 0.35);
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
   }
 }
 
@@ -38,11 +42,11 @@
 }
 
 .card-hover {
-  transition: box-shadow 0.2s ease, background-color 0.2s ease;
+  transition: box-shadow 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
 }
 
 .card-hover:hover {
-  box-shadow: 0 12px 24px rgba(28, 53, 45, 0.14);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.08);
 }
 
 .toast-enter {

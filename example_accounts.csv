@@ -1,12 +1,4 @@
-username,email,password,role,matricule,est_civil,corps_id,rank_id,speciality_id
-ahmed.benali,ahmed.benali@forces.ma,Pass1234!,Stagiaire,MAT-001,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,3e63d2ad-d146-49b8-9dc3-e4e7bffb4404,d0e250f6-546a-44c3-ac1d-ff3bc9367b5b
-youssef.idrissi,youssef.idrissi@forces.ma,Pass1234!,Stagiaire,MAT-002,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,19b15649-a8f6-42fd-942b-3a9030db0310,919e3818-2b49-4305-8c08-6c72172709cc
-fatima.lahlou,fatima.lahlou@forces.ma,Pass1234!,Stagiaire,MAT-003,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,802c64a6-d3b3-4bb6-83a2-19bba3ca5ecd,f555b817-a83f-4f78-b49c-2b129d6c45e7
-karim.ouali,karim.ouali@forces.ma,Pass1234!,Stagiaire,MAT-004,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,4706bce5-dda3-40cb-bc0c-a0a8956e3535,9e39cda2-420c-46c1-ad40-c6cf788ba902
-hassan.tazi,hassan.tazi@forces.ma,Pass1234!,Stagiaire,MAT-005,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,1ec2142e-da53-4401-bc50-1ecb6e7abf53,5f67053f-8bb5-4fa2-a359-e524e3d47e4c
-nour.el.amrani,nour.amrani@forces.ma,Pass1234!,Stagiaire,MAT-006,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,3e63d2ad-d146-49b8-9dc3-e4e7bffb4404,975e991b-3bc2-4865-b114-42fff04bc554
-omar.bennani,omar.bennani@forces.ma,Pass1234!,Instructeur,OFF-011,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,8b443858-a0e9-4d5c-b1ca-2b05e8cca9f3,d0e250f6-546a-44c3-ac1d-ff3bc9367b5b
-rachid.alaoui,rachid.alaoui@forces.ma,Pass1234!,Instructeur,OFF-012,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,d609a02b-f27b-4430-98f4-ab284854c694,919e3818-2b49-4305-8c08-6c72172709cc
-sophie.martin,sophie.martin@ecole.ma,Pass1234!,Instructeur,,true,,,
-nadia.bouzidi,nadia.bouzidi@forces.ma,Pass1234!,Superviseur,SUP-001,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,ec0fc82c-0bde-4d86-8e24-e8b479cfae0c,9e39cda2-420c-46c1-ad40-c6cf788ba902
-mourad.cherkaoui,m.cherkaoui@forces.ma,Pass1234!,Coordinateur,CRD-001,false,b1741c0b-d92f-4875-94c3-45ef33cb744f,1bf1991e-271c-469d-a34f-586e05adec3d,d0e250f6-546a-44c3-ac1d-ff3bc9367b5b
+username,email,password,role,matricule,arme
+stg_amine,amine.stagiaire@gmail.com,Pass123456,Stagiaire,STG001,Infanterie
+inst_hassan,hassan.inst@gmail.com,Pass123456,Instructeur,INS002,Artillerie
+coord_khalid,khalid.coord@gmail.com,Pass123456,Coordinateur,COO003,Génie

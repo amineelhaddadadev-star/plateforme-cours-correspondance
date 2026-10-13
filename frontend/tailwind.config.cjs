@@ -5,10 +5,10 @@ module.exports = {
     extend: {
       colors: {
         app: {
-          soft:   "#F9F6F3",
-          muted:  "#A6B28B",
-          dark:   "#1C352D",
-          accent: "#A6B28B",
+          soft:   "#F8FAFC",
+          muted:  "#E2E8F0",
+          dark:   "#0F172A",
+          accent: "#4F46E5",
         },
       },
       fontFamily: {

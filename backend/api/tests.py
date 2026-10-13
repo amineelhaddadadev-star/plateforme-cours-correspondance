@@ -1,3 +1,7 @@
+import io
+from io import BytesIO
+
+from openpyxl import Workbook
 from api.models import (
     Controle,
     ControleCorrection,
@@ -15,6 +19,7 @@ from api.models import (
 )
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework import status
@@ -30,9 +35,9 @@ class ApiTests(APITestCase):
             password=self.password,
             email="demo@example.com",
         )
-        self.corps = Corps.objects.order_by("label").first()
-        self.rank = Rank.objects.filter(corps=self.corps).order_by("label").first() if self.corps else None
-        self.speciality = Speciality.objects.order_by("label").first()
+        self.corps = Corps.objects.order_by("label").first() or Corps.objects.create(code="CORPS-DEF", label="Corps Défaut")
+        self.rank = Rank.objects.filter(corps=self.corps).order_by("label").first() or Rank.objects.create(code="RANK-DEF", label="Grade Défaut", corps=self.corps)
+        self.speciality = Speciality.objects.order_by("label").first() or Speciality.objects.create(code="SPEC-DEF", label="Spécialité Défaut", corps=self.corps)
         UserProfile.objects.create(
             user=self.user,
             role=UserProfile.ROLE_ADMIN,
@@ -365,9 +370,83 @@ class ApiTests(APITestCase):
         admin_response = self.client.get("/api/dashboard/admin/")
         self.assertEqual(admin_response.status_code, status.HTTP_200_OK)
         self.assertEqual(admin_response.data["role"], UserProfile.ROLE_ADMIN)
+        stageaire_data = next(item for item in admin_response.data["users"] if item["id"] == stageaire.id)
+        self.assertEqual(stageaire_data["matricule"], "S-4")
 
         toggle_response = self.client.post(f"/api/admin/users/{stageaire.id}/toggle-active/")
         self.assertEqual(toggle_response.status_code, status.HTTP_200_OK)
+
+    def test_admin_bulk_import_accepts_xlsx_file(self):
+        user_model = get_user_model()
+        corps = Corps.objects.create(code="CORPS-XLSX", label="Corps XLSX")
+        rank = Rank.objects.create(code="RANK-XLSX", label="Grade XLSX", corps=corps)
+        speciality = Speciality.objects.create(code="SPEC-XLSX", label="Spécialité XLSX", corps=corps)
+
+        admin = user_model.objects.create_user(username="admin-import", password="pass-1234")
+        UserProfile.objects.create(user=admin, role=UserProfile.ROLE_ADMIN, matricule="A-IMPORT")
+
+        admin_token = self.client.post("/api/token/", {"username": "admin-import", "password": "pass-1234"}, format="json").data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {admin_token}")
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["username", "email", "password", "role", "matricule", "est_civil", "corps_id", "rank_id", "speciality_id"])
+        sheet.append([
+            "xlsx-user-1",
+            "xlsx-user-1@example.com",
+            "StrongPass!123",
+            UserProfile.ROLE_INSTRUCTEUR,
+            "I-BULK-EXCEL",
+            "false",
+            str(corps.id_corps),
+            str(rank.id_rank),
+            str(speciality.id_speciality),
+        ])
+
+        buffer = BytesIO()
+        workbook.save(buffer)
+        buffer.seek(0)
+
+        response = self.client.post(
+            "/api/admin/accounts/bulk-csv/",
+            {"file": SimpleUploadedFile("users.xlsx", buffer.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["created_count"], 1)
+        self.assertTrue(user_model.objects.filter(username="xlsx-user-1").exists())
+
+    def test_admin_bulk_import_reports_duplicate_email_rows(self):
+        token = self.client.post(
+            "/api/token/",
+            {"username": self.username, "password": self.password},
+            format="json",
+        ).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        csv_content = "username,email,password,role,matricule,est_civil,corps_id,rank_id,speciality_id\n"
+        csv_content += "existing-email,demo@example.com,StrongPass!123,Admin,,,,,\n"
+        csv_content += "first-new-email,new@example.com,StrongPass!123,Admin,,,,,\n"
+        csv_content += "duplicate-new-email,NEW@example.com,StrongPass!123,Admin,,,,,\n"
+        csv_content += ",missing-user@example.com,StrongPass!123,Admin,,,,,\n"
+
+        response = self.client.post(
+            "/api/admin/accounts/bulk-csv/",
+            {"csv_content": csv_content},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["created_count"], 1)
+        self.assertEqual(
+            response.data["errors"],
+            [
+                {"line": 2, "error": "Email already exists"},
+                {"line": 4, "error": "Email already exists"},
+                {"line": 5, "error": "username, password and role are required"},
+            ],
+        )
 
     def test_admin_accounts_and_subjects_management(self):
         user_model = get_user_model()

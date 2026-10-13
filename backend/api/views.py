@@ -5,6 +5,7 @@ import zipfile
 import secrets
 import string
 
+from openpyxl import load_workbook
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.conf import settings as django_settings
@@ -42,6 +43,53 @@ from .models import (
     SujetFinStageFichier,
     UserProfile,
 )
+
+
+def _coerce_bulk_row(row):
+    normalized = {}
+    for key, value in (row or {}).items():
+        if key is None:
+            continue
+        normalized[str(key).strip().lower()] = "" if value is None else str(value).strip()
+    return normalized
+
+
+def _parse_bulk_csv_text(csv_text):
+    cleaned = (csv_text or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    if not cleaned.strip():
+        return []
+    first_line = cleaned.split("\n", 1)[0]
+    delimiter = ";" if first_line.count(";") > first_line.count(",") else ","
+    reader = csv.DictReader(io.StringIO(cleaned), delimiter=delimiter)
+    if not reader.fieldnames:
+        return []
+    reader.fieldnames = [str(field).strip() for field in reader.fieldnames]
+    return [_coerce_bulk_row(row) for row in reader]
+
+
+def _parse_bulk_import_rows(payload):
+    if payload is None:
+        return []
+    if isinstance(payload, str):
+        return _parse_bulk_csv_text(payload)
+    if hasattr(payload, "read"):
+        file_name = str(getattr(payload, "name", "")).lower()
+        content = payload.read()
+        if file_name.endswith((".xlsx", ".xlsm")):
+            workbook = load_workbook(filename=io.BytesIO(content), read_only=True, data_only=True)
+            if not workbook.worksheets:
+                return []
+            rows = list(workbook.worksheets[0].iter_rows(values_only=True))
+            if not rows:
+                return []
+            headers = [str(cell).strip() for cell in rows[0]]
+            return [
+                _coerce_bulk_row(dict(zip(headers, row)))
+                for row in rows[1:]
+                if any(cell is not None and str(cell).strip() for cell in row)
+            ]
+        return _parse_bulk_csv_text(content.decode("utf-8-sig", errors="replace"))
+    return []
 
 
 def resolve_reference_entities(corps_id, rank_id, speciality_id):
@@ -901,6 +949,7 @@ class AdminDashboardView(APIView):
                         "id": u.id,
                         "username": u.username,
                         "email": u.email,
+                        "matricule": getattr(getattr(u, "profile", None), "matricule", ""),
                         "is_active": u.is_active,
                         "role": getattr(getattr(u, "profile", None), "role", ""),
                     }
@@ -1110,17 +1159,13 @@ class AdminBulkCreateAccountsCsvView(APIView):
             return permission_error
 
         csv_content = request.data.get("csv_content")
-        if not csv_content:
-            return Response({"detail": "csv_content is required"}, status=status.HTTP_400_BAD_REQUEST)
+        uploaded_file = request.FILES.get("file") or request.FILES.get("csv_file") or request.FILES.get("excel_file")
+        rows = _parse_bulk_import_rows(uploaded_file if uploaded_file else csv_content)
+        if not rows:
+            return Response({"detail": "csv_content or file is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        cleaned = csv_content.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
-        first_line = cleaned.split("\n")[0]
-        delimiter = ";" if first_line.count(";") > first_line.count(",") else ","
-        reader = csv.DictReader(io.StringIO(cleaned), delimiter=delimiter)
         expected = {"username", "email", "password", "role", "matricule", "est_civil", "corps_id", "rank_id", "speciality_id"}
-        if reader.fieldnames:
-            reader.fieldnames = [f.strip() for f in reader.fieldnames]
-        actual = set(reader.fieldnames or [])
+        actual = {str(key).strip().lower() for key in rows[0].keys() if key is not None}
         missing = expected - actual
         extra = actual - expected
         if not actual or actual != expected:
@@ -1129,26 +1174,24 @@ class AdminBulkCreateAccountsCsvView(APIView):
                 msg += f" | Colonnes manquantes: {', '.join(sorted(missing))}"
             if extra:
                 msg += f" | Colonnes inconnues: {', '.join(sorted(extra))}"
-            return Response(
-                {"detail": msg},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": msg}, status=status.HTTP_400_BAD_REQUEST)
 
         valid_roles = {choice[0] for choice in UserProfile.ROLE_CHOICES}
         user_model = get_user_model()
         created = []
         errors = []
+        seen_emails = set()
 
-        for idx, row in enumerate(reader, start=2):
-            username = (row.get("username") or "").strip()
-            email = (row.get("email") or "").strip()
-            password = row.get("password") or ""
-            role = (row.get("role") or "").strip()
-            matricule = (row.get("matricule") or "").strip()
-            est_civil = (row.get("est_civil") or "").strip().lower() in {"1", "true", "yes", "y"}
-            corps_id = (row.get("corps_id") or "").strip()
-            rank_id = (row.get("rank_id") or "").strip()
-            speciality_id = (row.get("speciality_id") or "").strip()
+        for idx, row in enumerate(rows, start=2):
+            username = row.get("username", "")
+            email = row.get("email", "")
+            password = row.get("password", "")
+            role = row.get("role", "")
+            matricule = row.get("matricule", "")
+            est_civil = row.get("est_civil", "").lower() in {"1", "true", "yes", "y"}
+            corps_id = row.get("corps_id", "")
+            rank_id = row.get("rank_id", "")
+            speciality_id = row.get("speciality_id", "")
 
             if not username or not password or not role:
                 errors.append({"line": idx, "error": "username, password and role are required"})
@@ -1174,6 +1217,12 @@ class AdminBulkCreateAccountsCsvView(APIView):
             if user_model.objects.filter(username=username).exists():
                 errors.append({"line": idx, "error": "Username already exists"})
                 continue
+            email_key = email.casefold()
+            if email_key and (email_key in seen_emails or user_model.objects.filter(email__iexact=email).exists()):
+                errors.append({"line": idx, "error": "Email already exists"})
+                continue
+            if email_key:
+                seen_emails.add(email_key)
 
             user = user_model.objects.create_user(username=username, email=email, password=password)
             if role == UserProfile.ROLE_ADMIN:
